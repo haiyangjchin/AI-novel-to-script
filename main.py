@@ -26,6 +26,7 @@ LLM_MODEL = os.getenv("LLM_MODEL", "deepseek-chat")
 
 class ConvertRequest(BaseModel):
     novel_text: str
+    api_key: str = ""
 
 
 class ConvertResponse(BaseModel):
@@ -104,8 +105,15 @@ async def convert_novel(req: ConvertRequest):
     if len(req.novel_text) < 500:
         raise HTTPException(status_code=400, detail="文本太短，请提供至少 3 章的小说内容")
 
+    # 使用请求中的 API Key，否则回退到环境变量
+    api_key = req.api_key.strip() or client.api_key
+    if api_key == "sk-placeholder":
+        raise HTTPException(status_code=400, detail="请先设置 DeepSeek API Key")
+
+    req_client = OpenAI(api_key=api_key, base_url=str(client.base_url))
+
     try:
-        response = client.chat.completions.create(
+        response = req_client.chat.completions.create(
             model=LLM_MODEL,
             messages=[
                 {"role": "system", "content": SYSTEM_PROMPT},
