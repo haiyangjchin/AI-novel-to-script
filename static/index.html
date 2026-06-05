@@ -1,0 +1,455 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>AI 小说转剧本工具</title>
+<style>
+  :root {
+    --bg: #faf8f5;
+    --card: #ffffff;
+    --text: #2c2416;
+    --text-secondary: #6b5e4a;
+    --accent: #b8753b;
+    --accent-hover: #9a5f2e;
+    --border: #e5ddd0;
+    --tag-bg: #f5efe4;
+    --error-bg: #fef2f2;
+    --error-text: #991b1b;
+    --error-border: #fecaca;
+    --success-text: #166534;
+    --shadow: 0 1px 3px rgba(0,0,0,0.06), 0 1px 2px rgba(0,0,0,0.04);
+    --shadow-lg: 0 4px 24px rgba(0,0,0,0.08);
+  }
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    line-height: 1.6;
+    min-height: 100vh;
+  }
+
+  /* ---- Canvas 背景 ---- */
+  #bg-canvas {
+    position: fixed;
+    top: 0; left: 0;
+    width: 100%; height: 100%;
+    z-index: 0;
+    pointer-events: none;
+  }
+
+  /* ---- 头部 ---- */
+  .header {
+    position: relative; z-index: 1;
+    text-align: center;
+    padding: 40px 20px 20px;
+  }
+  .header h1 {
+    font-family: "Noto Serif SC", "Source Han Serif SC", "STSong", Georgia, serif;
+    font-size: 2rem;
+    font-weight: 700;
+    color: var(--text);
+    letter-spacing: 0.02em;
+  }
+  .header p {
+    color: var(--text-secondary);
+    font-size: 0.95rem;
+    margin-top: 6px;
+  }
+
+  /* ---- 主布局 ---- */
+  .main {
+    position: relative; z-index: 1;
+    max-width: 1400px;
+    margin: 0 auto;
+    padding: 0 24px 60px;
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 24px;
+  }
+
+  @media (max-width: 900px) {
+    .main { grid-template-columns: 1fr; }
+  }
+
+  /* ---- 卡片 ---- */
+  .card {
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    box-shadow: var(--shadow);
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+  }
+  .card-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 16px 20px;
+    border-bottom: 1px solid var(--border);
+    background: var(--tag-bg);
+  }
+  .card-header h2 {
+    font-size: 0.95rem;
+    font-weight: 600;
+    color: var(--text);
+  }
+  .card-body {
+    flex: 1;
+    padding: 20px;
+    display: flex;
+    flex-direction: column;
+  }
+
+  /* ---- 文本输入 ---- */
+  #novel-input {
+    flex: 1;
+    min-height: 420px;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 16px;
+    font-family: "Noto Serif SC", "Source Han Serif SC", Georgia, serif;
+    font-size: 0.9rem;
+    line-height: 1.8;
+    color: var(--text);
+    background: var(--bg);
+    resize: vertical;
+    outline: none;
+    transition: border-color 0.2s;
+  }
+  #novel-input:focus {
+    border-color: var(--accent);
+  }
+  #novel-input::placeholder {
+    color: #c4b8a7;
+  }
+
+  /* ---- 按钮 ---- */
+  .btn-row {
+    display: flex;
+    gap: 10px;
+    margin-top: 14px;
+    flex-wrap: wrap;
+  }
+  .btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 10px 20px;
+    border: none;
+    border-radius: 8px;
+    font-size: 0.9rem;
+    font-weight: 500;
+    cursor: pointer;
+    transition: all 0.2s;
+    font-family: inherit;
+  }
+  .btn-primary {
+    background: var(--accent);
+    color: #fff;
+  }
+  .btn-primary:hover { background: var(--accent-hover); }
+  .btn-primary:disabled {
+    opacity: 0.6;
+    cursor: not-allowed;
+  }
+  .btn-secondary {
+    background: var(--card);
+    color: var(--text);
+    border: 1px solid var(--border);
+  }
+  .btn-secondary:hover { background: var(--tag-bg); }
+
+  /* ---- YAML 输出区 ---- */
+  #yaml-output {
+    flex: 1;
+    min-height: 420px;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 16px;
+    font-family: "JetBrains Mono", "Cascadia Code", "Fira Code", "Consolas", monospace;
+    font-size: 0.82rem;
+    line-height: 1.7;
+    color: var(--text);
+    background: #fdfcf9;
+    overflow: auto;
+    white-space: pre-wrap;
+    word-break: break-all;
+  }
+  #yaml-output:empty::after {
+    content: "转换结果将在这里显示...";
+    color: #c4b8a7;
+  }
+
+  /* ---- 状态提示 ---- */
+  .toast {
+    position: fixed;
+    top: 20px;
+    left: 50%;
+    transform: translateX(-50%);
+    z-index: 999;
+    padding: 12px 24px;
+    border-radius: 8px;
+    font-size: 0.9rem;
+    font-weight: 500;
+    animation: slideDown 0.3s ease;
+    display: none;
+  }
+  .toast.error {
+    display: block;
+    background: var(--error-bg);
+    color: var(--error-text);
+    border: 1px solid var(--error-border);
+  }
+  .toast.success {
+    display: block;
+    background: #f0fdf4;
+    color: var(--success-text);
+    border: 1px solid #bbf7d0;
+  }
+
+  @keyframes slideDown {
+    from { opacity: 0; transform: translateX(-50%) translateY(-12px); }
+    to { opacity: 1; transform: translateX(-50%) translateY(0); }
+  }
+
+  /* ---- 加载动画 ---- */
+  .spinner {
+    display: none;
+    width: 18px; height: 18px;
+    border: 2px solid rgba(255,255,255,0.3);
+    border-top-color: #fff;
+    border-radius: 50%;
+    animation: spin 0.6s linear infinite;
+  }
+  .loading .spinner { display: inline-block; }
+  .loading .btn-text { display: none; }
+
+  @keyframes spin { to { transform: rotate(360deg); } }
+
+  /* ---- 字数统计 ---- */
+  .char-count {
+    font-size: 0.8rem;
+    color: var(--text-secondary);
+    margin-top: 6px;
+  }
+
+  /* ---- YAML key 高亮 ---- */
+  .yaml-key { color: #b8753b; }
+  .yaml-string { color: #166534; }
+  .yaml-comment { color: #9ca3af; font-style: italic; }
+</style>
+</head>
+<body>
+
+<canvas id="bg-canvas"></canvas>
+
+<div class="header">
+  <h1>AI 小说转剧本工具</h1>
+  <p>将小说章节自动转换为结构化 YAML 剧本，快速获得可编辑的剧本初稿</p>
+</div>
+
+<div class="main">
+
+  <!-- 左侧：输入区 -->
+  <div class="card">
+    <div class="card-header">
+      <h2>📖 小说原文</h2>
+      <span class="char-count" id="char-count">0 字</span>
+    </div>
+    <div class="card-body">
+      <textarea id="novel-input" placeholder="在此粘贴小说文本（至少 3 章）..."></textarea>
+      <div class="btn-row">
+        <button class="btn btn-secondary" id="btn-sample">加载示例文本</button>
+        <button class="btn btn-primary" id="btn-convert">
+          <span class="btn-text">转换为剧本</span>
+          <span class="spinner"></span>
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 右侧：输出区 -->
+  <div class="card">
+    <div class="card-header">
+      <h2>📜 剧本 YAML</h2>
+      <button class="btn btn-secondary" id="btn-download" style="padding:6px 14px;font-size:0.82rem;" disabled>下载 YAML</button>
+    </div>
+    <div class="card-body">
+      <pre id="yaml-output"></pre>
+    </div>
+  </div>
+
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script>
+// ===== Canvas 背景装饰 =====
+const canvas = document.getElementById('bg-canvas');
+const ctx = canvas.getContext('2d');
+
+function resizeCanvas() {
+  canvas.width = window.innerWidth;
+  canvas.height = window.innerHeight;
+}
+resizeCanvas();
+window.addEventListener('resize', resizeCanvas);
+
+function drawBg() {
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+  // 柔和的圆点装饰
+  const dots = [
+    { x: canvas.width * 0.08, y: canvas.height * 0.15, r: 2.5, a: 0.12 },
+    { x: canvas.width * 0.12, y: canvas.height * 0.22, r: 1.8, a: 0.08 },
+    { x: canvas.width * 0.85, y: canvas.height * 0.18, r: 2.0, a: 0.10 },
+    { x: canvas.width * 0.90, y: canvas.height * 0.28, r: 3.0, a: 0.06 },
+    { x: canvas.width * 0.92, y: canvas.height * 0.70, r: 2.2, a: 0.09 },
+    { x: canvas.width * 0.06, y: canvas.height * 0.75, r: 1.6, a: 0.11 },
+    { x: canvas.width * 0.15, y: canvas.height * 0.85, r: 2.4, a: 0.07 },
+    { x: canvas.width * 0.50, y: canvas.height * 0.05, r: 1.4, a: 0.05 },
+  ];
+
+  ctx.fillStyle = '#b8753b';
+  for (const d of dots) {
+    ctx.globalAlpha = d.a;
+    ctx.beginPath();
+    ctx.arc(d.x, d.y, d.r, 0, Math.PI * 2);
+    ctx.fill();
+  }
+
+  // 柔和的连接线
+  ctx.globalAlpha = 0.04;
+  ctx.strokeStyle = '#b8753b';
+  ctx.lineWidth = 1;
+  ctx.beginPath();
+  ctx.moveTo(dots[0].x, dots[0].y);
+  ctx.bezierCurveTo(
+    canvas.width * 0.3, canvas.height * 0.1,
+    canvas.width * 0.6, canvas.height * 0.3,
+    dots[3].x, dots[3].y
+  );
+  ctx.stroke();
+
+  ctx.globalAlpha = 1;
+}
+drawBg();
+window.addEventListener('resize', drawBg);
+
+// ===== 页面逻辑 =====
+const novelInput = document.getElementById('novel-input');
+const yamlOutput = document.getElementById('yaml-output');
+const btnConvert = document.getElementById('btn-convert');
+const btnSample = document.getElementById('btn-sample');
+const btnDownload = document.getElementById('btn-download');
+const charCount = document.getElementById('char-count');
+const toast = document.getElementById('toast');
+
+// 字数统计
+novelInput.addEventListener('input', () => {
+  charCount.textContent = novelInput.value.length + ' 字';
+});
+
+// 加载示例文本
+btnSample.addEventListener('click', async () => {
+  btnSample.textContent = '加载中...';
+  btnSample.disabled = true;
+  try {
+    const resp = await fetch('/sample/novel.txt');
+    if (!resp.ok) throw new Error('示例文件加载失败');
+    const text = await resp.text();
+    novelInput.value = text;
+    charCount.textContent = text.length + ' 字';
+  } catch (e) {
+    showToast('加载示例失败: ' + e.message, 'error');
+  } finally {
+    btnSample.textContent = '加载示例文本';
+    btnSample.disabled = false;
+  }
+});
+
+// 转换
+btnConvert.addEventListener('click', async () => {
+  const text = novelInput.value.trim();
+  if (!text) {
+    showToast('请先输入小说文本', 'error');
+    return;
+  }
+  if (text.length < 500) {
+    showToast('文本太短，请提供至少 3 章的小说内容（至少 500 字）', 'error');
+    return;
+  }
+
+  btnConvert.classList.add('loading');
+  btnConvert.disabled = true;
+  yamlOutput.textContent = '';
+
+  try {
+    const resp = await fetch('/api/convert', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ novel_text: text }),
+    });
+
+    const data = await resp.json();
+
+    if (data.success) {
+      yamlOutput.innerHTML = highlightYaml(data.yaml_content);
+      btnDownload.disabled = false;
+      showToast('转换成功！', 'success');
+      setTimeout(() => { toast.style.display = 'none'; }, 2500);
+    } else {
+      showToast(data.error || '转换失败', 'error');
+    }
+  } catch (e) {
+    showToast('请求失败: ' + e.message, 'error');
+  } finally {
+    btnConvert.classList.remove('loading');
+    btnConvert.disabled = false;
+  }
+});
+
+// 下载 YAML
+btnDownload.addEventListener('click', () => {
+  const content = yamlOutput.textContent;
+  if (!content) return;
+  const blob = new Blob([content], { type: 'text/yaml;charset=utf-8' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = 'screenplay.yaml';
+  a.click();
+  URL.revokeObjectURL(url);
+});
+
+// Toast 提示
+function showToast(msg, type) {
+  toast.textContent = msg;
+  toast.className = 'toast ' + type;
+  toast.style.display = 'block';
+  setTimeout(() => { toast.style.display = 'none'; }, 4000);
+}
+
+// YAML 语法高亮
+function highlightYaml(yaml) {
+  return yaml
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    // 注释
+    .replace(/(#.*$)/gm, '<span class="yaml-comment">$1</span>')
+    // key:
+    .replace(/^(\s*)([\w一-鿿-]+)(\s*:)/gm,
+      '$1<span class="yaml-key">$2</span>$3')
+    // 字符串值（引号内）
+    .replace(/("[^"]*")/g, '<span class="yaml-string">$1</span>');
+}
+</script>
+
+</body>
+</html>
