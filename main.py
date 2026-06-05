@@ -1,4 +1,5 @@
 import os
+import re
 import yaml
 from pathlib import Path
 from fastapi import FastAPI, HTTPException
@@ -89,10 +90,61 @@ scenes:
 确保 characters 数组中有完整角色信息，scenes 中的 characters_present 引用角色 id，dialogues 中的 character 也引用角色 id。"""
 
 
+class ChapterInfo(BaseModel):
+    index: int
+    title: str
+    start_pos: int
+
+
+class ChapterDetectResponse(BaseModel):
+    chapters: list[ChapterInfo]
+    count: int
+    meets_minimum: bool
+
+
+CHAPTER_PATTERNS = [
+    re.compile(r"^第[一二三四五六七八九十百千\d]+章\b.*", re.MULTILINE),
+    re.compile(r"^第[一二三四五六七八九十百千\d]+卷\b.*", re.MULTILINE),
+    re.compile(r"^第[一二三四五六七八九十百千\d]+回\b.*", re.MULTILINE),
+    re.compile(r"^第[一二三四五六七八九十百千\d]+节\b.*", re.MULTILINE),
+    re.compile(r"^(?:Chapter|CHAPTER)\s+\d+\b.*", re.MULTILINE),
+]
+
+
+def detect_chapters(text: str) -> list[ChapterInfo]:
+    matches = []
+    for pattern in CHAPTER_PATTERNS:
+        for m in pattern.finditer(text):
+            matches.append((m.start(), m.group().strip()))
+    seen = set()
+    unique = []
+    for pos, title in sorted(matches, key=lambda x: x[0]):
+        if pos not in seen:
+            seen.add(pos)
+            unique.append((pos, title))
+    return [
+        ChapterInfo(index=i + 1, title=title, start_pos=pos)
+        for i, (pos, title) in enumerate(unique)
+    ]
+
+
 @app.get("/")
 async def root():
     from fastapi.responses import RedirectResponse
     return RedirectResponse(url="/static/index.html")
+
+
+@app.post("/api/detect-chapters", response_model=ChapterDetectResponse)
+async def detect_chapters_endpoint(req: ConvertRequest):
+    """自动识别小说文本中的章节"""
+    if not req.novel_text.strip():
+        raise HTTPException(status_code=400, detail="小说文本不能为空")
+    chapters = detect_chapters(req.novel_text)
+    return ChapterDetectResponse(
+        chapters=chapters,
+        count=len(chapters),
+        meets_minimum=len(chapters) >= 3,
+    )
 
 
 @app.post("/api/convert", response_model=ConvertResponse)

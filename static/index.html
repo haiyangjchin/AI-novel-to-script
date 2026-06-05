@@ -266,6 +266,26 @@
     border-color: var(--accent);
   }
 
+  /* ---- 章节信息 ---- */
+  .chapter-info {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-top: 10px;
+    font-size: 0.82rem;
+    color: var(--text-secondary);
+    min-height: 24px;
+  }
+  .chapter-info .badge {
+    display: inline-block;
+    padding: 2px 8px;
+    border-radius: 4px;
+    font-size: 0.78rem;
+    font-weight: 500;
+  }
+  .badge-ok { background: #dcfce7; color: #166534; }
+  .badge-warn { background: #fef3c7; color: #92400e; }
+
   /* ---- YAML key 高亮 ---- */
   .yaml-key { color: #b8753b; }
   .yaml-string { color: #166534; }
@@ -295,6 +315,7 @@
         <input type="password" id="api-key" placeholder="输入 DeepSeek API Key..." autocomplete="off">
       </div>
       <textarea id="novel-input" placeholder="在此粘贴小说文本（至少 3 章）..."></textarea>
+      <div class="chapter-info" id="chapter-info"></div>
       <div class="btn-row">
         <button class="btn btn-secondary" id="btn-sample">加载示例文本</button>
         <button class="btn btn-primary" id="btn-convert">
@@ -381,6 +402,7 @@ const btnConvert = document.getElementById('btn-convert');
 const btnSample = document.getElementById('btn-sample');
 const btnDownload = document.getElementById('btn-download');
 const charCount = document.getElementById('char-count');
+const chapterInfo = document.getElementById('chapter-info');
 const toast = document.getElementById('toast');
 
 // 从 localStorage 恢复 API Key
@@ -392,10 +414,40 @@ apiKeyInput.addEventListener('input', () => {
   localStorage.setItem('deepseek_api_key', apiKeyInput.value);
 });
 
-// 字数统计
+// 字数统计 + 章节检测（防抖）
+let detectTimer = null;
 novelInput.addEventListener('input', () => {
   charCount.textContent = novelInput.value.length + ' 字';
+  clearTimeout(detectTimer);
+  detectTimer = setTimeout(detectChapters, 600);
 });
+
+// 章节检测
+async function detectChapters() {
+  const text = novelInput.value.trim();
+  if (!text) {
+    chapterInfo.innerHTML = '';
+    return;
+  }
+  try {
+    const resp = await fetch('/api/detect-chapters', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ novel_text: text }),
+    });
+    const data = await resp.json();
+    if (data.count > 0) {
+      const titles = data.chapters.map(c => c.title).join('、');
+      const cls = data.meets_minimum ? 'badge badge-ok' : 'badge badge-warn';
+      const label = data.meets_minimum ? '可转换' : '不足3章';
+      chapterInfo.innerHTML = `<span class="${cls}">${data.count} 章</span> ${label} · ${titles}`;
+    } else {
+      chapterInfo.innerHTML = '<span class="badge badge-warn">未识别到章节</span> 请确保文本包含"第X章"等章节标记';
+    }
+  } catch (e) {
+    // 静默失败，不影响主流程
+  }
+}
 
 // 加载示例文本
 btnSample.addEventListener('click', async () => {
@@ -407,6 +459,7 @@ btnSample.addEventListener('click', async () => {
     const text = await resp.text();
     novelInput.value = text;
     charCount.textContent = text.length + ' 字';
+    detectChapters();
   } catch (e) {
     showToast('加载示例失败: ' + e.message, 'error');
   } finally {
