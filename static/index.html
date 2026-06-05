@@ -238,6 +238,34 @@
     margin-top: 6px;
   }
 
+  /* ---- API Key 输入 ---- */
+  .api-key-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 12px;
+  }
+  .api-key-row label {
+    font-size: 0.82rem;
+    color: var(--text-secondary);
+    white-space: nowrap;
+    font-weight: 500;
+  }
+  .api-key-row input {
+    flex: 1;
+    padding: 8px 12px;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    font-size: 0.82rem;
+    font-family: "Consolas", monospace;
+    background: var(--bg);
+    outline: none;
+    transition: border-color 0.2s;
+  }
+  .api-key-row input:focus {
+    border-color: var(--accent);
+  }
+
   /* ---- YAML key 高亮 ---- */
   .yaml-key { color: #b8753b; }
   .yaml-string { color: #166534; }
@@ -262,6 +290,10 @@
       <span class="char-count" id="char-count">0 字</span>
     </div>
     <div class="card-body">
+      <div class="api-key-row">
+        <label for="api-key">Key</label>
+        <input type="password" id="api-key" placeholder="输入 DeepSeek API Key..." autocomplete="off">
+      </div>
       <textarea id="novel-input" placeholder="在此粘贴小说文本（至少 3 章）..."></textarea>
       <div class="btn-row">
         <button class="btn btn-secondary" id="btn-sample">加载示例文本</button>
@@ -344,11 +376,21 @@ window.addEventListener('resize', drawBg);
 // ===== 页面逻辑 =====
 const novelInput = document.getElementById('novel-input');
 const yamlOutput = document.getElementById('yaml-output');
+const apiKeyInput = document.getElementById('api-key');
 const btnConvert = document.getElementById('btn-convert');
 const btnSample = document.getElementById('btn-sample');
 const btnDownload = document.getElementById('btn-download');
 const charCount = document.getElementById('char-count');
 const toast = document.getElementById('toast');
+
+// 从 localStorage 恢复 API Key
+const savedKey = localStorage.getItem('deepseek_api_key');
+if (savedKey) apiKeyInput.value = savedKey;
+
+// 保存 API Key
+apiKeyInput.addEventListener('input', () => {
+  localStorage.setItem('deepseek_api_key', apiKeyInput.value);
+});
 
 // 字数统计
 novelInput.addEventListener('input', () => {
@@ -393,7 +435,7 @@ btnConvert.addEventListener('click', async () => {
     const resp = await fetch('/api/convert', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ novel_text: text }),
+      body: JSON.stringify({ novel_text: text, api_key: apiKeyInput.value }),
     });
 
     const data = await resp.json();
