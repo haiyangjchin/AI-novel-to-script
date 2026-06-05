@@ -16,12 +16,12 @@ app = FastAPI(title="AI 小说转剧本工具")
 app.mount("/static", StaticFiles(directory=str(BASE_DIR / "static")), name="static")
 app.mount("/sample", StaticFiles(directory=str(BASE_DIR / "sample")), name="sample")
 
-# LLM 客户端（从环境变量读取配置）
+# LLM 客户端（从环境变量读取配置，默认使用 DeepSeek）
 client = OpenAI(
-    api_key=os.getenv("OPENAI_API_KEY", "sk-placeholder"),
-    base_url=os.getenv("OPENAI_BASE_URL", "https://api.openai.com/v1"),
+    api_key=os.getenv("DEEPSEEK_API_KEY", "sk-placeholder"),
+    base_url=os.getenv("DEEPSEEK_BASE_URL", "https://api.deepseek.com"),
 )
-LLM_MODEL = os.getenv("LLM_MODEL", "gpt-4o")
+LLM_MODEL = os.getenv("LLM_MODEL", "deepseek-chat")
 
 
 class ConvertRequest(BaseModel):
