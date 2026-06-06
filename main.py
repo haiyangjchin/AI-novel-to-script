@@ -155,8 +155,9 @@ async def convert_novel(req: ConvertRequest):
         raise HTTPException(status_code=400, detail="小说文本不能为空")
 
     # 检查文本长度（至少需要 3 章小说的基本长度）
-    if len(req.novel_text) < 500:
-        raise HTTPException(status_code=400, detail="文本太短，请提供至少 3 章的小说内容")
+    chapters = detect_chapters(req.novel_text)
+    if len(chapters) < 3:
+        raise HTTPException(status_code=400, detail=f"检测到 {len(chapters)} 章，至少需要 3 章小说内容才能转换")
 
     # 使用请求中的 API Key，否则回退到环境变量
     api_key = req.api_key.strip() or client.api_key
@@ -208,8 +209,9 @@ async def convert_novel_stream(req: ConvertRequest):
     if not req.novel_text.strip():
         raise HTTPException(status_code=400, detail="小说文本不能为空")
 
-    if len(req.novel_text) < 500:
-        raise HTTPException(status_code=400, detail="文本太短，请提供至少 3 章的小说内容")
+    chapters = detect_chapters(req.novel_text)
+    if len(chapters) < 3:
+        raise HTTPException(status_code=400, detail=f"检测到 {len(chapters)} 章，至少需要 3 章小说内容才能转换")
 
     api_key = req.api_key.strip() or client.api_key
     if api_key == "sk-placeholder":

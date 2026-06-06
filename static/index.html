@@ -249,7 +249,19 @@
     margin-top: 6px;
   }
 
-  /* ---- API Key 输入 ---- */
+  /* ---- 转换状态标记 ---- */
+  .convert-status {
+    display: none;
+    align-items: center;
+    gap: 4px;
+    font-size: 0.82rem;
+    font-weight: 500;
+    padding: 6px 10px;
+    border-radius: 6px;
+  }
+  .convert-status.show { display: inline-flex; }
+  .convert-status.ok { color: #166534; background: #dcfce7; }
+  .convert-status.warn { color: #92400e; background: #fef3c7; }
   .api-key-row {
     display: flex;
     align-items: center;
@@ -333,6 +345,7 @@
           <span class="btn-text">转换为剧本</span>
           <span class="spinner"></span>
         </button>
+        <span class="convert-status" id="convert-status"></span>
       </div>
     </div>
   </div>
@@ -414,7 +427,10 @@ const btnSample = document.getElementById('btn-sample');
 const btnDownload = document.getElementById('btn-download');
 const charCount = document.getElementById('char-count');
 const chapterInfo = document.getElementById('chapter-info');
+const convertStatus = document.getElementById('convert-status');
 const toast = document.getElementById('toast');
+
+let lastChapterResult = null;  // 缓存最近一次章节检测结果
 
 // 从 localStorage 恢复 API Key
 const savedKey = localStorage.getItem('deepseek_api_key');
@@ -447,16 +463,34 @@ async function detectChapters() {
       body: JSON.stringify({ novel_text: text }),
     });
     const data = await resp.json();
+    lastChapterResult = data;
     if (data.count > 0) {
       const titles = data.chapters.map(c => c.title).join('、');
       const cls = data.meets_minimum ? 'badge badge-ok' : 'badge badge-warn';
       const label = data.meets_minimum ? '可转换' : '不足3章';
       chapterInfo.innerHTML = `<span class="${cls}">${data.count} 章</span> ${label} · ${titles}`;
     } else {
+      lastChapterResult = null;
       chapterInfo.innerHTML = '<span class="badge badge-warn">未识别到章节</span> 请确保文本包含"第X章"等章节标记';
     }
+    updateConvertStatus();
   } catch (e) {
     // 静默失败，不影响主流程
+  }
+}
+
+function updateConvertStatus() {
+  if (!lastChapterResult || lastChapterResult.count === 0) {
+    convertStatus.className = 'convert-status';
+    convertStatus.textContent = '';
+    return;
+  }
+  if (lastChapterResult.meets_minimum) {
+    convertStatus.className = 'convert-status show ok';
+    convertStatus.textContent = '✓ ' + lastChapterResult.count + ' 章，可以转换';
+  } else {
+    convertStatus.className = 'convert-status show warn';
+    convertStatus.textContent = '⚠ 仅 ' + lastChapterResult.count + ' 章，至少需要 3 章';
   }
 }
 
@@ -486,8 +520,18 @@ btnConvert.addEventListener('click', async () => {
     showToast('请先输入小说文本', 'error');
     return;
   }
-  if (text.length < 500) {
-    showToast('文本太短，请提供至少 3 章的小说内容（至少 500 字）', 'error');
+
+  // 章节数校验：未检测过则先检测
+  if (!lastChapterResult) {
+    await detectChapters();
+  }
+  if (!lastChapterResult || !lastChapterResult.meets_minimum) {
+    const count = lastChapterResult ? lastChapterResult.count : 0;
+    if (count === 0) {
+      showToast('未识别到章节，请确保文本包含"第X章"等章节标记，且至少 3 章', 'error');
+    } else {
+      showToast(`仅检测到 ${count} 章，至少需要 3 章小说内容才能转换`, 'error');
+    }
     return;
   }
 
