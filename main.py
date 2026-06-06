@@ -1,10 +1,11 @@
+import json
 import os
 import re
 import yaml
 from pathlib import Path
 from fastapi import FastAPI, HTTPException
 from fastapi.staticfiles import StaticFiles
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel
 from openai import OpenAI
 
@@ -199,6 +200,72 @@ async def convert_novel(req: ConvertRequest):
             success=False,
             error=f"转换失败: {str(e)}",
         )
+
+
+@app.post("/api/convert-stream")
+async def convert_novel_stream(req: ConvertRequest):
+    """将小说文本转换为剧本 YAML（SSE 流式输出）"""
+    if not req.novel_text.strip():
+        raise HTTPException(status_code=400, detail="小说文本不能为空")
+
+    if len(req.novel_text) < 500:
+        raise HTTPException(status_code=400, detail="文本太短，请提供至少 3 章的小说内容")
+
+    api_key = req.api_key.strip() or client.api_key
+    if api_key == "sk-placeholder":
+        raise HTTPException(status_code=400, detail="请先设置 DeepSeek API Key")
+
+    req_client = OpenAI(api_key=api_key, base_url=str(client.base_url))
+
+    async def generate():
+        full_content = ""
+        try:
+            stream = req_client.chat.completions.create(
+                model=LLM_MODEL,
+                messages=[
+                    {"role": "system", "content": SYSTEM_PROMPT},
+                    {"role": "user", "content": f"请将以下小说内容转换为剧本 YAML：\n\n{req.novel_text}"},
+                ],
+                temperature=0.3,
+                max_tokens=8192,
+                stream=True,
+            )
+
+            for chunk in stream:
+                delta = chunk.choices[0].delta
+                if delta.content:
+                    full_content += delta.content
+                    yield f"data: {json.dumps({'type': 'chunk', 'content': delta.content})}\n\n"
+
+            # 清理 markdown 代码块
+            cleaned = full_content.strip()
+            if cleaned.startswith("```"):
+                lines = cleaned.split("\n")
+                if lines[0].startswith("```"):
+                    lines = lines[1:]
+                if lines and lines[-1].strip() == "```":
+                    lines = lines[:-1]
+                cleaned = "\n".join(lines)
+
+            # 验证 YAML
+            try:
+                yaml.safe_load(cleaned)
+                yield f"data: {json.dumps({'type': 'done', 'yaml_content': cleaned})}\n\n"
+            except yaml.YAMLError as ye:
+                yield f"data: {json.dumps({'type': 'done_warn', 'yaml_content': cleaned, 'warning': f'YAML 校验未通过: {str(ye)}'})}\n\n"
+
+        except Exception as e:
+            yield f"data: {json.dumps({'type': 'error', 'message': str(e)})}\n\n"
+
+    return StreamingResponse(
+        generate(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
+    )
 
 
 @app.get("/api/health")
