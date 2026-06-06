@@ -115,6 +115,7 @@
     flex-direction: column;
     overflow-y: auto;
     min-height: 0;
+    position: relative;
   }
 
   /* ---- 文本输入 ---- */
@@ -422,6 +423,39 @@
     padding-top: 8px;
     border-top: 1px dashed var(--border);
   }
+
+  /* ---- 滚动按钮 ---- */
+  .scroll-btns {
+    display: none;
+    position: absolute;
+    right: 8px;
+    top: 50%;
+    transform: translateY(-50%);
+    flex-direction: column;
+    gap: 4px;
+    z-index: 2;
+  }
+  .scroll-btns.show { display: flex; }
+  .scroll-btn {
+    width: 28px;
+    height: 28px;
+    border-radius: 50%;
+    border: 1px solid var(--border);
+    background: var(--card);
+    color: var(--text-secondary);
+    cursor: pointer;
+    font-size: 0.75rem;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: all 0.15s;
+    box-shadow: var(--shadow);
+  }
+  .scroll-btn:hover {
+    background: var(--accent);
+    color: #fff;
+    border-color: var(--accent);
+  }
   .convert-status {
     display: none;
     align-items: center;
@@ -535,6 +569,10 @@
       </div>
     </div>
     <div class="card-body">
+      <div class="scroll-btns" id="scroll-btns">
+        <button class="scroll-btn" id="scroll-up" title="向上滚动">▲</button>
+        <button class="scroll-btn" id="scroll-down" title="向下滚动">▼</button>
+      </div>
       <pre id="yaml-output"></pre>
       <div id="scene-preview"></div>
     </div>
@@ -611,6 +649,9 @@ const convertStatus = document.getElementById('convert-status');
 const tabSource = document.getElementById('tab-source');
 const tabPreview = document.getElementById('tab-preview');
 const scenePreview = document.getElementById('scene-preview');
+const scrollBtns = document.getElementById('scroll-btns');
+const scrollUp = document.getElementById('scroll-up');
+const scrollDown = document.getElementById('scroll-down');
 const toast = document.getElementById('toast');
 
 let lastChapterResult = null;  // 缓存最近一次章节检测结果
@@ -684,13 +725,25 @@ tabSource.addEventListener('click', () => {
   tabPreview.classList.remove('active');
   yamlOutput.style.display = '';
   scenePreview.classList.remove('show');
+  scrollBtns.classList.remove('show');
 });
 tabPreview.addEventListener('click', () => {
   tabPreview.classList.add('active');
   tabSource.classList.remove('active');
   yamlOutput.style.display = 'none';
   scenePreview.classList.add('show');
+  scrollBtns.classList.add('show');
   if (lastRawYaml) renderSceneCards(lastRawYaml);
+});
+
+// 滚动按钮
+scrollUp.addEventListener('click', () => {
+  const target = scenePreview.classList.contains('show') ? scenePreview : yamlOutput;
+  target.scrollBy({ top: -300, behavior: 'smooth' });
+});
+scrollDown.addEventListener('click', () => {
+  const target = scenePreview.classList.contains('show') ? scenePreview : yamlOutput;
+  target.scrollBy({ top: 300, behavior: 'smooth' });
 });
 
 // 解析 YAML 并渲染场景卡片
