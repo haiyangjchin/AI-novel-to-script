@@ -911,14 +911,32 @@ btnCopy.addEventListener('click', async () => {
   const content = yamlOutput.textContent;
   if (!content) return;
   try {
-    await navigator.clipboard.writeText(content);
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      await navigator.clipboard.writeText(content);
+    } else {
+      fallbackCopy(content);
+    }
     const original = btnCopy.textContent;
     btnCopy.textContent = '已复制';
     setTimeout(() => { btnCopy.textContent = original; }, 2000);
   } catch {
-    showToast('复制失败，请手动复制', 'error');
+    try { fallbackCopy(content); }
+    catch { showToast('复制失败，请手动复制', 'error'); return; }
+    btnCopy.textContent = '已复制';
+    setTimeout(() => { btnCopy.textContent = '复制'; }, 2000);
   }
 });
+
+function fallbackCopy(text) {
+  const ta = document.createElement('textarea');
+  ta.value = text;
+  ta.style.position = 'fixed';
+  ta.style.left = '-9999px';
+  document.body.appendChild(ta);
+  ta.select();
+  document.execCommand('copy');
+  document.body.removeChild(ta);
+}
 
 // Toast 提示
 function showToast(msg, type) {
