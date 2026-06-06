@@ -29,7 +29,10 @@
     background: var(--bg);
     color: var(--text);
     line-height: 1.6;
-    min-height: 100vh;
+    height: 100vh;
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
   }
 
   /* ---- Canvas 背景 ---- */
@@ -45,11 +48,12 @@
   .header {
     position: relative; z-index: 1;
     text-align: center;
-    padding: 40px 20px 20px;
+    padding: 18px 20px 10px;
+    flex-shrink: 0;
   }
   .header h1 {
     font-family: "Noto Serif SC", "Source Han Serif SC", "STSong", Georgia, serif;
-    font-size: 2rem;
+    font-size: 1.6rem;
     font-weight: 700;
     color: var(--text);
     letter-spacing: 0.02em;
@@ -63,12 +67,16 @@
   /* ---- 主布局 ---- */
   .main {
     position: relative; z-index: 1;
-    max-width: 1400px;
+    max-width: 1500px;
+    width: 90%;
     margin: 0 auto;
-    padding: 0 24px 60px;
+    padding: 0 0 24px;
     display: grid;
     grid-template-columns: 1fr 1fr;
-    gap: 24px;
+    gap: 28px;
+    height: calc(100vh - 80px);
+    min-height: 0;
+    overflow: hidden;
   }
 
   @media (max-width: 900px) {
@@ -84,6 +92,7 @@
     display: flex;
     flex-direction: column;
     overflow: hidden;
+    min-height: 0;
   }
   .card-header {
     display: flex;
@@ -103,12 +112,14 @@
     padding: 20px;
     display: flex;
     flex-direction: column;
+    overflow-y: auto;
+    min-height: 0;
   }
 
   /* ---- 文本输入 ---- */
   #novel-input {
     flex: 1;
-    min-height: 420px;
+    min-height: 0;
     border: 1px solid var(--border);
     border-radius: 8px;
     padding: 16px;
@@ -117,7 +128,7 @@
     line-height: 1.8;
     color: var(--text);
     background: var(--bg);
-    resize: vertical;
+    resize: none;
     outline: none;
     transition: border-color 0.2s;
   }
@@ -167,7 +178,7 @@
   /* ---- YAML 输出区 ---- */
   #yaml-output {
     flex: 1;
-    min-height: 420px;
+    min-height: 0;
     border: 1px solid var(--border);
     border-radius: 8px;
     padding: 16px;
