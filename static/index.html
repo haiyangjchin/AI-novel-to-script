@@ -578,8 +578,10 @@
         <input type="password" id="api-key" placeholder="输入 DeepSeek API Key..." autocomplete="off">
       </div>
       <textarea id="novel-input" placeholder="在此粘贴小说文本（至少 3 章）..."></textarea>
+      <input type="file" id="file-input" accept=".txt" style="display:none;">
       <div class="chapter-info" id="chapter-info"></div>
       <div class="btn-row">
+        <button class="btn btn-secondary" id="btn-upload">上传 TXT</button>
         <button class="btn btn-secondary" id="btn-sample">加载示例文本</button>
         <button class="btn btn-primary" id="btn-convert">
           <span class="btn-text">转换为剧本</span>
@@ -673,6 +675,8 @@ const yamlOutput = document.getElementById('yaml-output');
 const apiKeyInput = document.getElementById('api-key');
 const btnConvert = document.getElementById('btn-convert');
 const btnSample = document.getElementById('btn-sample');
+const btnUpload = document.getElementById('btn-upload');
+const fileInput = document.getElementById('file-input');
 const btnDownload = document.getElementById('btn-download');
 const btnCopy = document.getElementById('btn-copy');
 const charCount = document.getElementById('char-count');
@@ -903,6 +907,22 @@ function renderCharCards(yamlText) {
     charPreview.appendChild(card);
   });
 }
+
+// 上传 TXT 文件
+btnUpload.addEventListener('click', () => fileInput.click());
+fileInput.addEventListener('change', () => {
+  const file = fileInput.files[0];
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = () => {
+    novelInput.value = reader.result;
+    charCount.textContent = novelInput.value.length + ' 字';
+    detectChapters();
+  };
+  reader.onerror = () => showToast('文件读取失败', 'error');
+  reader.readAsText(file, 'UTF-8');
+  fileInput.value = '';
+});
 
 // 加载示例文本
 btnSample.addEventListener('click', async () => {
