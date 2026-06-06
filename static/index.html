@@ -354,7 +354,10 @@
   <div class="card">
     <div class="card-header">
       <h2>📜 剧本 YAML</h2>
-      <button class="btn btn-secondary" id="btn-download" style="padding:6px 14px;font-size:0.82rem;" disabled>下载 YAML</button>
+      <div style="display:flex;gap:8px;">
+        <button class="btn btn-secondary" id="btn-copy" style="padding:6px 14px;font-size:0.82rem;" disabled>复制</button>
+        <button class="btn btn-secondary" id="btn-download" style="padding:6px 14px;font-size:0.82rem;" disabled>下载 YAML</button>
+      </div>
     </div>
     <div class="card-body">
       <pre id="yaml-output"></pre>
@@ -425,6 +428,7 @@ const apiKeyInput = document.getElementById('api-key');
 const btnConvert = document.getElementById('btn-convert');
 const btnSample = document.getElementById('btn-sample');
 const btnDownload = document.getElementById('btn-download');
+const btnCopy = document.getElementById('btn-copy');
 const charCount = document.getElementById('char-count');
 const chapterInfo = document.getElementById('chapter-info');
 const convertStatus = document.getElementById('convert-status');
@@ -575,6 +579,7 @@ btnConvert.addEventListener('click', async () => {
         } else if (data.type === 'done' || data.type === 'done_warn') {
           yamlOutput.innerHTML = highlightYaml(data.yaml_content);
           btnDownload.disabled = false;
+          btnCopy.disabled = false;
           if (data.warning) {
             showToast(data.warning, 'error');
           } else {
@@ -607,6 +612,20 @@ btnDownload.addEventListener('click', () => {
   a.download = 'screenplay.yaml';
   a.click();
   URL.revokeObjectURL(url);
+});
+
+// 复制到剪贴板
+btnCopy.addEventListener('click', async () => {
+  const content = yamlOutput.textContent;
+  if (!content) return;
+  try {
+    await navigator.clipboard.writeText(content);
+    const original = btnCopy.textContent;
+    btnCopy.textContent = '已复制';
+    setTimeout(() => { btnCopy.textContent = original; }, 2000);
+  } catch {
+    showToast('复制失败，请手动复制', 'error');
+  }
 });
 
 // Toast 提示
