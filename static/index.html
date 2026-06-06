@@ -782,9 +782,10 @@ function renderSceneCards(yamlText) {
   scenePreview.innerHTML = '';
   let data;
   try {
+    if (typeof jsyaml === 'undefined') throw new Error('js-yaml 库未加载，请检查网络连接');
     data = jsyaml.load(yamlText);
-  } catch {
-    scenePreview.innerHTML = '<div style="padding:20px;color:var(--error-text);text-align:center;">YAML 解析失败，请切换到"源码"查看</div>';
+  } catch (e) {
+    scenePreview.innerHTML = '<div style="padding:20px;color:var(--error-text);text-align:center;">YAML 解析失败: ' + escHtml(e.message) + '</div>';
     return;
   }
   if (!data || !data.scenes || !data.scenes.length) {
@@ -871,9 +872,10 @@ function renderCharCards(yamlText) {
   charPreview.innerHTML = '';
   let data;
   try {
+    if (typeof jsyaml === 'undefined') throw new Error('js-yaml 库未加载，请检查网络连接');
     data = jsyaml.load(yamlText);
-  } catch {
-    charPreview.innerHTML = '<div style="padding:20px;color:var(--error-text);text-align:center;">YAML 解析失败，请切换到"源码"查看</div>';
+  } catch (e) {
+    charPreview.innerHTML = '<div style="padding:20px;color:var(--error-text);text-align:center;">YAML 解析失败: ' + escHtml(e.message) + '</div>';
     return;
   }
   if (!data || !data.characters || !data.characters.length) {
