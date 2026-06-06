@@ -115,7 +115,6 @@
     flex-direction: column;
     overflow-y: auto;
     min-height: 0;
-    position: relative;
   }
 
   /* ---- 文本输入 ---- */
@@ -403,11 +402,7 @@
     font-size: 0.85rem;
     color: var(--text);
     line-height: 1.6;
-    font-family: "Noto Serif SC", Georgia, serif;
-    quotes: "\\201C" "\\201D";
   }
-  .dialogue-line::before { content: "\\201C"; }
-  .dialogue-line::after { content: "\\201D"; }
   .dialogue-detail {
     font-size: 0.75rem;
     color: var(--text-secondary);
@@ -424,38 +419,77 @@
     border-top: 1px dashed var(--border);
   }
 
-  /* ---- 滚动按钮 ---- */
-  .scroll-btns {
+  /* ---- 角色卡片预览 ---- */
+  #char-preview {
+    flex: 1;
+    min-height: 0;
+    overflow-y: auto;
     display: none;
-    position: absolute;
-    right: 8px;
-    top: 50%;
-    transform: translateY(-50%);
     flex-direction: column;
-    gap: 4px;
-    z-index: 2;
+    gap: 14px;
   }
-  .scroll-btns.show { display: flex; }
-  .scroll-btn {
-    width: 28px;
-    height: 28px;
-    border-radius: 50%;
-    border: 1px solid var(--border);
+  #char-preview.show { display: flex; }
+
+  .char-card {
     background: var(--card);
-    color: var(--text-secondary);
-    cursor: pointer;
-    font-size: 0.75rem;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    transition: all 0.15s;
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    overflow: hidden;
     box-shadow: var(--shadow);
   }
-  .scroll-btn:hover {
+  .char-card-header {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 12px 16px;
+    background: var(--tag-bg);
+    border-bottom: 1px solid var(--border);
+  }
+  .char-name {
+    font-weight: 700;
+    color: var(--accent);
+    font-size: 0.9rem;
+  }
+  .char-role {
+    font-size: 0.75rem;
     background: var(--accent);
     color: #fff;
-    border-color: var(--accent);
+    padding: 2px 10px;
+    border-radius: 10px;
+    font-weight: 500;
   }
+  .char-gender {
+    font-size: 0.78rem;
+    color: var(--text-secondary);
+  }
+  .char-card-body { padding: 12px 16px; }
+  .char-detail {
+    font-size: 0.82rem;
+    color: var(--text-secondary);
+    line-height: 1.7;
+    margin-bottom: 8px;
+  }
+  .char-detail strong { color: var(--text); }
+  .char-relationships {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    flex-wrap: wrap;
+    font-size: 0.78rem;
+    padding-top: 8px;
+    border-top: 1px dashed var(--border);
+  }
+  .char-relationships .rel-label { color: var(--text-secondary); }
+  .rel-tag {
+    display: inline-block;
+    padding: 2px 8px;
+    border-radius: 4px;
+    background: #fef3c7;
+    color: #92400e;
+    font-size: 0.76rem;
+    font-weight: 500;
+  }
+
   .convert-status {
     display: none;
     align-items: center;
@@ -562,6 +596,7 @@
       <div class="output-tabs">
         <button class="output-tab active" id="tab-source">源码</button>
         <button class="output-tab" id="tab-preview">预览</button>
+        <button class="output-tab" id="tab-char">角色</button>
       </div>
       <div style="display:flex;gap:8px;">
         <button class="btn btn-secondary" id="btn-copy" style="padding:6px 14px;font-size:0.82rem;" disabled>复制</button>
@@ -569,12 +604,9 @@
       </div>
     </div>
     <div class="card-body">
-      <div class="scroll-btns" id="scroll-btns">
-        <button class="scroll-btn" id="scroll-up" title="向上滚动">▲</button>
-        <button class="scroll-btn" id="scroll-down" title="向下滚动">▼</button>
-      </div>
       <pre id="yaml-output"></pre>
       <div id="scene-preview"></div>
+      <div id="char-preview"></div>
     </div>
   </div>
 
@@ -648,10 +680,9 @@ const chapterInfo = document.getElementById('chapter-info');
 const convertStatus = document.getElementById('convert-status');
 const tabSource = document.getElementById('tab-source');
 const tabPreview = document.getElementById('tab-preview');
+const tabChar = document.getElementById('tab-char');
 const scenePreview = document.getElementById('scene-preview');
-const scrollBtns = document.getElementById('scroll-btns');
-const scrollUp = document.getElementById('scroll-up');
-const scrollDown = document.getElementById('scroll-down');
+const charPreview = document.getElementById('char-preview');
 const toast = document.getElementById('toast');
 
 let lastChapterResult = null;  // 缓存最近一次章节检测结果
@@ -719,31 +750,27 @@ function updateConvertStatus() {
   }
 }
 
-// 标签切换：源码 / 预览
-tabSource.addEventListener('click', () => {
-  tabSource.classList.add('active');
-  tabPreview.classList.remove('active');
-  yamlOutput.style.display = '';
+// 标签切换：源码 / 预览 / 角色
+function switchTab(tab) {
+  [tabSource, tabPreview, tabChar].forEach(t => t.classList.remove('active'));
+  tab.classList.add('active');
+  yamlOutput.style.display = 'none';
   scenePreview.classList.remove('show');
-  scrollBtns.classList.remove('show');
+  charPreview.classList.remove('show');
+}
+tabSource.addEventListener('click', () => {
+  switchTab(tabSource);
+  yamlOutput.style.display = '';
 });
 tabPreview.addEventListener('click', () => {
-  tabPreview.classList.add('active');
-  tabSource.classList.remove('active');
-  yamlOutput.style.display = 'none';
+  switchTab(tabPreview);
   scenePreview.classList.add('show');
-  scrollBtns.classList.add('show');
   if (lastRawYaml) renderSceneCards(lastRawYaml);
 });
-
-// 滚动按钮
-scrollUp.addEventListener('click', () => {
-  const target = scenePreview.classList.contains('show') ? scenePreview : yamlOutput;
-  target.scrollBy({ top: -300, behavior: 'smooth' });
-});
-scrollDown.addEventListener('click', () => {
-  const target = scenePreview.classList.contains('show') ? scenePreview : yamlOutput;
-  target.scrollBy({ top: 300, behavior: 'smooth' });
+tabChar.addEventListener('click', () => {
+  switchTab(tabChar);
+  charPreview.classList.add('show');
+  if (lastRawYaml) renderCharCards(lastRawYaml);
 });
 
 // 解析 YAML 并渲染场景卡片
@@ -835,6 +862,48 @@ function escHtml(s) {
   return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 }
 
+// 解析 YAML 并渲染角色卡片
+function renderCharCards(yamlText) {
+  charPreview.innerHTML = '';
+  let data;
+  try {
+    data = jsyaml.load(yamlText);
+  } catch {
+    charPreview.innerHTML = '<div style="padding:20px;color:var(--error-text);text-align:center;">YAML 解析失败，请切换到"源码"查看</div>';
+    return;
+  }
+  if (!data || !data.characters || !data.characters.length) {
+    charPreview.innerHTML = '<div style="padding:20px;color:var(--text-secondary);text-align:center;">暂无角色数据</div>';
+    return;
+  }
+
+  data.characters.forEach(c => {
+    const card = document.createElement('div');
+    card.className = 'char-card';
+
+    let relationshipsHtml = '';
+    if (c.relationships && c.relationships.length) {
+      relationshipsHtml = '<div class="char-relationships"><span class="rel-label">🔗 关系</span>' +
+        c.relationships.map(r => `<span class="rel-tag">${escHtml(typeof r === 'string' ? r : r.with + ': ' + r.type)}</span>`).join('') +
+        '</div>';
+    }
+
+    card.innerHTML = `
+      <div class="char-card-header">
+        <span class="char-name">${escHtml(c.name)}</span>
+        ${c.role ? `<span class="char-role">${escHtml(c.role)}</span>` : ''}
+        ${c.gender ? `<span class="char-gender">${escHtml(c.gender)}</span>` : ''}
+        ${c.age ? `<span class="char-gender">${escHtml(c.age)}</span>` : ''}
+      </div>
+      <div class="char-card-body">
+        ${c.personality ? `<div class="char-detail"><strong>性格：</strong>${escHtml(c.personality)}</div>` : ''}
+        ${c.description ? `<div class="char-detail"><strong>描述：</strong>${escHtml(c.description)}</div>` : ''}
+        ${relationshipsHtml}
+      </div>`;
+    charPreview.appendChild(card);
+  });
+}
+
 // 加载示例文本
 btnSample.addEventListener('click', async () => {
   btnSample.textContent = '加载中...';
@@ -880,12 +949,11 @@ btnConvert.addEventListener('click', async () => {
   btnConvert.disabled = true;
   yamlOutput.textContent = '';
   scenePreview.innerHTML = '';
+  charPreview.innerHTML = '';
   lastRawYaml = '';
   // 转换开始时切回源码标签
-  tabSource.classList.add('active');
-  tabPreview.classList.remove('active');
+  switchTab(tabSource);
   yamlOutput.style.display = '';
-  scenePreview.classList.remove('show');
   let accumulated = '';
 
   try {
