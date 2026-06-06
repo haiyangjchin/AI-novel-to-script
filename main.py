@@ -109,65 +109,59 @@ class ChapterDetectResponse(BaseModel):
 
 def fix_yaml_common_errors(raw_yaml: str) -> str:
     """修复 LLM 生成的 YAML 中的常见结构错误"""
-    lines = raw_yaml.split("\n")
-    fixed_lines = []
-    in_dialogue_block = False
-    dialogue_indent = 0
-    i = 0
+    import re
 
+    # 策略：用正则直接移除 dialogue 块中多余的 actions: 及其子项
+    # 匹配 actions: 键及其下属的数组项（更深缩进的所有行）
+    # 保留原有的 action: 行不动
+    def remove_actions_block(match):
+        return match.group(0)  # 不修改，仅用于定位
+
+    # 更简洁的策略：逐行扫描，跳过 dialogue 内的 actions: 块
+    lines = raw_yaml.split('\n')
+    result = []
+    i = 0
     while i < len(lines):
         line = lines[i]
         stripped = line.lstrip()
-        indent = len(line) - len(stripped)
 
-        # 检测进入 dialogue 列表项
-        if stripped.startswith("- character:") or stripped.startswith("- character :"):
-            in_dialogue_block = True
-            dialogue_indent = indent
-            fixed_lines.append(line)
-            i += 1
-            continue
+        # 检测 actions: 行（缩进 > 0，且不在顶层 scenes 下）
+        if re.match(r'^(\s+)actions:\s*$', line):
+            indent = len(line) - len(stripped)
+            # 判断是否在 dialogue 上下文中：
+            # 向前查找，在同缩进或更浅的行中是否有 - character:
+            in_dialogue = False
+            for j in range(len(result) - 1, -1, -1):
+                prev = result[j]
+                prev_stripped = prev.lstrip()
+                prev_indent = len(prev) - len(prev_stripped)
+                if prev_indent < indent:
+                    if re.match(r'-\s*character:', prev_stripped):
+                        in_dialogue = True
+                    break
+                if prev_indent == indent and re.match(r'-\s*character:', prev_stripped):
+                    in_dialogue = True
+                    break
 
-        # 在 dialogue 块内，检测是否遇到新的顶级列表项（跳出 dialogue）
-        if in_dialogue_block and stripped.startswith("- ") and indent <= dialogue_indent:
-            if not stripped.startswith("- character:") and not stripped.startswith("- character :"):
-                in_dialogue_block = False
-
-        # 在 dialogue 块内，将 "actions:" 及其子项替换为合并后的 "action" 字符串
-        if in_dialogue_block and stripped.startswith("actions:") and indent > dialogue_indent:
-            action_parts = []
-            actions_indent = indent
-            i += 1
-            while i < len(lines):
-                next_line = lines[i]
-                next_stripped = next_line.lstrip()
-                next_indent = len(next_line) - len(next_stripped)
-                if next_stripped.startswith("- ") and next_indent > actions_indent:
-                    item_text = next_stripped[2:].strip()
-                    if item_text.startswith("content:"):
-                        item_text = item_text[8:].strip().strip('"').strip("'")
-                    elif item_text.startswith("type:"):
+            if in_dialogue:
+                # 跳过 actions: 及其所有子行（缩进更深的行）
+                i += 1
+                while i < len(lines):
+                    child = lines[i]
+                    child_stripped = child.lstrip()
+                    if not child_stripped:
                         i += 1
                         continue
-                    if item_text:
-                        action_parts.append(item_text)
+                    child_indent = len(child) - len(child_stripped)
+                    if child_indent <= indent:
+                        break
                     i += 1
-                elif next_stripped == "" or next_indent <= actions_indent:
-                    break
-                else:
-                    i += 1
+                continue  # 不输出 actions 块
 
-            if action_parts:
-                merged = "；".join(action_parts)
-                fixed_lines.append(" " * (actions_indent - 2) + f'action: "{merged}"')
-            else:
-                fixed_lines.append(" " * (actions_indent - 2) + 'action: ""')
-            continue
-
-        fixed_lines.append(line)
+        result.append(line)
         i += 1
 
-    return "\n".join(fixed_lines)
+    return '\n'.join(result)
 
 
 CHAPTER_PATTERNS = [

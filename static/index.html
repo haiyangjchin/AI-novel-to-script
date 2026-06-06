@@ -780,70 +780,50 @@ tabChar.addEventListener('click', () => {
 // 修复 LLM 生成的 YAML 中的常见结构错误
 function fixYamlCommonErrors(yamlText) {
   const lines = yamlText.split('\n');
-  const fixedLines = [];
-  let inDialogueBlock = false;
-  let dialogueIndent = 0;
-  let skipUntilLine = -1;
-
-  for (let i = 0; i < lines.length; i++) {
-    // 跳过已被标记跳过的行
-    if (i < skipUntilLine) continue;
-
+  const result = [];
+  let i = 0;
+  while (i < lines.length) {
     const line = lines[i];
     const stripped = line.replace(/^\s+/, '');
-    const indent = line.length - stripped.length;
 
-    // 检测进入 dialogue 列表项
-    if (stripped.startsWith('- character:') || stripped.startsWith('- character :')) {
-      inDialogueBlock = true;
-      dialogueIndent = indent;
-      fixedLines.push(line);
-      continue;
-    }
-
-    // 在 dialogue 块内，检测是否遇到新的顶级列表项（跳出 dialogue）
-    if (inDialogueBlock && stripped.startsWith('- ') && indent <= dialogueIndent) {
-      if (!stripped.startsWith('- character:') && !stripped.startsWith('- character :')) {
-        inDialogueBlock = false;
-      }
-    }
-
-    // 在 dialogue 块内，将 "actions:" 及其子项替换为合并后的 "action" 字符串
-    if (inDialogueBlock && stripped.startsWith('actions:') && indent > dialogueIndent) {
-      const actionParts = [];
-      const actionsIndent = indent;
-      let j = i + 1;
-      while (j < lines.length) {
-        const nextLine = lines[j];
-        const nextStripped = nextLine.replace(/^\s+/, '');
-        const nextIndent = nextLine.length - nextStripped.length;
-        if (nextStripped.startsWith('- ') && nextIndent > actionsIndent) {
-          let itemText = nextStripped.substring(2).trim();
-          if (itemText.startsWith('content:')) {
-            itemText = itemText.substring(8).trim().replace(/^["']|["']$/g, '');
-          } else if (itemText.startsWith('type:')) {
-            j++;
-            continue;
-          }
-          if (itemText) actionParts.push(itemText);
-          j++;
-        } else if (nextStripped === '' || nextIndent <= actionsIndent) {
+    // 检测 actions: 行（缩进 > 0）
+    if (/^\s+actions:\s*$/.test(line)) {
+      const indent = line.length - stripped.length;
+      // 判断是否在 dialogue 上下文中：向前查找是否有 - character:
+      let inDialogue = false;
+      for (let j = result.length - 1; j >= 0; j--) {
+        const prev = result[j];
+        const prevStripped = prev.replace(/^\s+/, '');
+        const prevIndent = prev.length - prevStripped.length;
+        if (prevIndent < indent) {
+          if (/^-\s*character:/.test(prevStripped)) inDialogue = true;
           break;
-        } else {
-          j++;
+        }
+        if (prevIndent === indent && /^-\s*character:/.test(prevStripped)) {
+          inDialogue = true;
+          break;
         }
       }
-      // 生成修复后的 action 行
-      const merged = actionParts.join('；');
-      fixedLines.push(' '.repeat(Math.max(0, actionsIndent - 2)) + `action: "${merged}"`);
-      skipUntilLine = j;
-      continue;
+
+      if (inDialogue) {
+        // 跳过 actions: 及其所有子行（缩进更深的行）
+        i++;
+        while (i < lines.length) {
+          const child = lines[i];
+          const childStripped = child.replace(/^\s+/, '');
+          if (!childStripped) { i++; continue; }
+          const childIndent = child.length - childStripped.length;
+          if (childIndent <= indent) break;
+          i++;
+        }
+        continue; // 不输出 actions 块
+      }
     }
 
-    fixedLines.push(line);
+    result.push(line);
+    i++;
   }
-
-  return fixedLines.join('\n');
+  return result.join('\n');
 }
 
 // 解析 YAML 并渲染场景卡片
