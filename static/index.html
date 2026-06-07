@@ -3,6 +3,9 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
+<meta http-equiv="Pragma" content="no-cache">
+<meta http-equiv="Expires" content="0">
 <title>AI 小说转剧本工具</title>
 <script src="https://cdn.jsdelivr.net/npm/js-yaml@4.1.0/dist/js-yaml.min.js"></script>
 <style>
@@ -578,10 +581,10 @@
         <input type="password" id="api-key" placeholder="输入 DeepSeek API Key..." autocomplete="off">
       </div>
       <textarea id="novel-input" placeholder="在此粘贴小说文本（至少 3 章）..."></textarea>
-      <input type="file" id="file-input" accept=".txt" style="display:none;">
+      <input type="file" id="file-input" accept=".txt,.docx" style="display:none;">
       <div class="chapter-info" id="chapter-info"></div>
       <div class="btn-row">
-        <button class="btn btn-secondary" id="btn-upload">上传 TXT</button>
+        <button class="btn btn-secondary" id="btn-upload">上传文件</button>
         <button class="btn btn-secondary" id="btn-sample">加载示例文本</button>
         <button class="btn btn-primary" id="btn-convert">
           <span class="btn-text">转换为剧本</span>
@@ -798,27 +801,25 @@ tabChar.addEventListener('click', () => {
 });
 
 // 修复 LLM 生成的 YAML 中的常见结构错误
-// 策略：正向状态机追踪 dialogue 上下文，移除 dialogue 内的 actions: 块
+// 单 pass 状态机：追踪 dialogue 上下文，移除 dialogue 内的 actions: 及其子项
 function fixYamlCommonErrors(yamlText) {
   const lines = yamlText.split('\n');
   const result = [];
-  let i = 0;
   let inDialogue = false;
   let dialogueIndent = 0;
-  let skipUntilIndent = -1; // > 0 时跳过所有缩进更深的行
+  let skipIndent = -1; // > 0 时跳过所有缩进更深的行
 
-  while (i < lines.length) {
-    const line = lines[i];
+  for (const line of lines) {
     const stripped = line.replace(/^\s+/, '');
     const indent = stripped ? line.length - stripped.length : -1;
 
     // 空行保持原样
-    if (!stripped) { result.push(line); i++; continue; }
+    if (!stripped) { result.push(line); continue; }
 
     // 正在跳过 actions 子行
-    if (skipUntilIndent >= 0) {
-      if (indent > skipUntilIndent) { i++; continue; }
-      skipUntilIndent = -1; // 停止跳过
+    if (skipIndent >= 0) {
+      if (indent > skipIndent) continue;
+      skipIndent = -1;
     }
 
     // 检测 dialogue 列表项
@@ -826,24 +827,21 @@ function fixYamlCommonErrors(yamlText) {
       inDialogue = true;
       dialogueIndent = indent;
       result.push(line);
-      i++;
       continue;
     }
 
-    // 在 dialogue 块内，检查是否退出
+    // 检查是否退出 dialogue 块
     if (inDialogue && indent <= dialogueIndent) {
       inDialogue = false;
     }
 
-    // 在 dialogue 块内，检测并移除 actions: 块
+    // 在 dialogue 块内，移除 actions: 及其子项
     if (inDialogue && /^actions:\s*$/.test(stripped)) {
-      skipUntilIndent = indent;
-      i++;
+      skipIndent = indent;
       continue;
     }
 
     result.push(line);
-    i++;
   }
   return result.join('\n');
 }
@@ -983,19 +981,49 @@ function renderCharCards(yamlText) {
   });
 }
 
-// 上传 TXT 文件
+// 上传文件（支持 .txt 和 .docx）
 btnUpload.addEventListener('click', () => fileInput.click());
-fileInput.addEventListener('change', () => {
+fileInput.addEventListener('change', async () => {
   const file = fileInput.files[0];
   if (!file) return;
-  const reader = new FileReader();
-  reader.onload = () => {
-    novelInput.value = reader.result;
-    charCount.textContent = novelInput.value.length + ' 字';
-    detectChapters();
-  };
-  reader.onerror = () => showToast('文件读取失败', 'error');
-  reader.readAsText(file, 'UTF-8');
+  const ext = file.name.split('.').pop().toLowerCase();
+
+  if (ext === 'txt') {
+    // .txt 文件前端直接读取
+    const reader = new FileReader();
+    reader.onload = () => {
+      novelInput.value = reader.result;
+      charCount.textContent = novelInput.value.length + ' 字';
+      detectChapters();
+    };
+    reader.onerror = () => showToast('文件读取失败', 'error');
+    reader.readAsText(file, 'UTF-8');
+  } else if (ext === 'docx') {
+    // .docx 文件发送到后端提取文本
+    btnUpload.textContent = '解析中...';
+    btnUpload.disabled = true;
+    try {
+      const formData = new FormData();
+      formData.append('file', file);
+      const resp = await fetch('/api/extract-docx', { method: 'POST', body: formData });
+      if (!resp.ok) {
+        const err = await resp.json();
+        throw new Error(err.detail || '文件解析失败');
+      }
+      const data = await resp.json();
+      novelInput.value = data.text;
+      charCount.textContent = data.text.length + ' 字';
+      detectChapters();
+      showToast('文件解析成功', 'success');
+    } catch (e) {
+      showToast(e.message, 'error');
+    } finally {
+      btnUpload.textContent = '上传文件';
+      btnUpload.disabled = false;
+    }
+  } else {
+    showToast('仅支持 .txt 和 .docx 文件', 'error');
+  }
   fileInput.value = '';
 });
 
