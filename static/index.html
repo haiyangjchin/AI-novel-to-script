@@ -798,46 +798,48 @@ tabChar.addEventListener('click', () => {
 });
 
 // 修复 LLM 生成的 YAML 中的常见结构错误
+// 策略：正向状态机追踪 dialogue 上下文，移除 dialogue 内的 actions: 块
 function fixYamlCommonErrors(yamlText) {
   const lines = yamlText.split('\n');
   const result = [];
   let i = 0;
+  let inDialogue = false;
+  let dialogueIndent = 0;
+  let skipUntilIndent = -1; // > 0 时跳过所有缩进更深的行
+
   while (i < lines.length) {
     const line = lines[i];
     const stripped = line.replace(/^\s+/, '');
+    const indent = stripped ? line.length - stripped.length : -1;
 
-    // 检测 actions: 行（缩进 > 0）
-    if (/^\s+actions:\s*$/.test(line)) {
-      const indent = line.length - stripped.length;
-      // 判断是否在 dialogue 上下文中：向前查找是否有 - character:
-      let inDialogue = false;
-      for (let j = result.length - 1; j >= 0; j--) {
-        const prev = result[j];
-        const prevStripped = prev.replace(/^\s+/, '');
-        const prevIndent = prev.length - prevStripped.length;
-        if (prevIndent < indent) {
-          if (/^-\s*character:/.test(prevStripped)) inDialogue = true;
-          break;
-        }
-        if (prevIndent === indent && /^-\s*character:/.test(prevStripped)) {
-          inDialogue = true;
-          break;
-        }
-      }
+    // 空行保持原样
+    if (!stripped) { result.push(line); i++; continue; }
 
-      if (inDialogue) {
-        // 跳过 actions: 及其所有子行（缩进更深的行）
-        i++;
-        while (i < lines.length) {
-          const child = lines[i];
-          const childStripped = child.replace(/^\s+/, '');
-          if (!childStripped) { i++; continue; }
-          const childIndent = child.length - childStripped.length;
-          if (childIndent <= indent) break;
-          i++;
-        }
-        continue; // 不输出 actions 块
-      }
+    // 正在跳过 actions 子行
+    if (skipUntilIndent >= 0) {
+      if (indent > skipUntilIndent) { i++; continue; }
+      skipUntilIndent = -1; // 停止跳过
+    }
+
+    // 检测 dialogue 列表项
+    if (/^-\s*character:/.test(stripped)) {
+      inDialogue = true;
+      dialogueIndent = indent;
+      result.push(line);
+      i++;
+      continue;
+    }
+
+    // 在 dialogue 块内，检查是否退出
+    if (inDialogue && indent <= dialogueIndent) {
+      inDialogue = false;
+    }
+
+    // 在 dialogue 块内，检测并移除 actions: 块
+    if (inDialogue && /^actions:\s*$/.test(stripped)) {
+      skipUntilIndent = indent;
+      i++;
+      continue;
     }
 
     result.push(line);
