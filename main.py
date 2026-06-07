@@ -15,9 +15,17 @@ BASE_DIR = Path(__file__).resolve().parent
 
 app = FastAPI(title="AI 小说转剧本工具")
 
-# 挂载静态文件目录
-app.mount("/static", StaticFiles(directory=str(BASE_DIR / "static")), name="static")
+# 挂载静态文件目录（禁用缓存，开发时始终加载最新文件）
+app.mount("/static", StaticFiles(directory=str(BASE_DIR / "static"), html=True), name="static")
 app.mount("/sample", StaticFiles(directory=str(BASE_DIR / "sample")), name="sample")
+
+
+@app.middleware("http")
+async def add_no_cache_header(request, call_response):
+    response = await call_response(request)
+    if request.url.path.startswith("/static"):
+        response.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
+    return response
 
 # LLM 客户端（从环境变量读取配置，默认使用 DeepSeek）
 client = OpenAI(
