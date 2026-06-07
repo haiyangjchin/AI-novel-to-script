@@ -315,7 +315,7 @@
     font-size: 0.82rem;
     color: var(--text-secondary);
   }
-  .scene-card-body { padding: 14px 16px; }
+  .scene-card-body { padding: 14px 16px; max-height: 360px; overflow-y: auto; }
 
   .scene-setting {
     font-size: 0.84rem;
@@ -578,8 +578,10 @@
         <input type="password" id="api-key" placeholder="输入 DeepSeek API Key..." autocomplete="off">
       </div>
       <textarea id="novel-input" placeholder="在此粘贴小说文本（至少 3 章）..."></textarea>
+      <input type="file" id="file-input" accept=".txt" style="display:none;">
       <div class="chapter-info" id="chapter-info"></div>
       <div class="btn-row">
+        <button class="btn btn-secondary" id="btn-upload">上传 TXT</button>
         <button class="btn btn-secondary" id="btn-sample">加载示例文本</button>
         <button class="btn btn-primary" id="btn-convert">
           <span class="btn-text">转换为剧本</span>
@@ -673,6 +675,8 @@ const yamlOutput = document.getElementById('yaml-output');
 const apiKeyInput = document.getElementById('api-key');
 const btnConvert = document.getElementById('btn-convert');
 const btnSample = document.getElementById('btn-sample');
+const btnUpload = document.getElementById('btn-upload');
+const fileInput = document.getElementById('file-input');
 const btnDownload = document.getElementById('btn-download');
 const btnCopy = document.getElementById('btn-copy');
 const charCount = document.getElementById('char-count');
@@ -688,13 +692,33 @@ const toast = document.getElementById('toast');
 let lastChapterResult = null;  // 缓存最近一次章节检测结果
 let lastRawYaml = '';          // 缓存最近一次转换的原始 YAML
 
-// 从 localStorage 恢复 API Key
-const savedKey = localStorage.getItem('deepseek_api_key');
-if (savedKey) apiKeyInput.value = savedKey;
+// 从后端恢复 API Key（优先），localStorage 兜底
+(async () => {
+  try {
+    const resp = await fetch('/api/settings/key');
+    const data = await resp.json();
+    if (data.api_key) {
+      apiKeyInput.value = data.api_key;
+      return;
+    }
+  } catch (e) {}
+  // 后端没有则尝试 localStorage
+  const savedKey = localStorage.getItem('deepseek_api_key');
+  if (savedKey) apiKeyInput.value = savedKey;
+})();
 
-// 保存 API Key
+// 保存 API Key（同时保存到 localStorage 和后端）
+let saveKeyTimer = null;
 apiKeyInput.addEventListener('input', () => {
   localStorage.setItem('deepseek_api_key', apiKeyInput.value);
+  clearTimeout(saveKeyTimer);
+  saveKeyTimer = setTimeout(() => {
+    fetch('/api/settings', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ novel_text: '', api_key: apiKeyInput.value }),
+    }).catch(() => {});
+  }, 800);
 });
 
 // 字数统计 + 章节检测（防抖）
@@ -773,14 +797,67 @@ tabChar.addEventListener('click', () => {
   if (lastRawYaml) renderCharCards(lastRawYaml);
 });
 
+// 修复 LLM 生成的 YAML 中的常见结构错误
+// 策略：正向状态机追踪 dialogue 上下文，移除 dialogue 内的 actions: 块
+function fixYamlCommonErrors(yamlText) {
+  const lines = yamlText.split('\n');
+  const result = [];
+  let i = 0;
+  let inDialogue = false;
+  let dialogueIndent = 0;
+  let skipUntilIndent = -1; // > 0 时跳过所有缩进更深的行
+
+  while (i < lines.length) {
+    const line = lines[i];
+    const stripped = line.replace(/^\s+/, '');
+    const indent = stripped ? line.length - stripped.length : -1;
+
+    // 空行保持原样
+    if (!stripped) { result.push(line); i++; continue; }
+
+    // 正在跳过 actions 子行
+    if (skipUntilIndent >= 0) {
+      if (indent > skipUntilIndent) { i++; continue; }
+      skipUntilIndent = -1; // 停止跳过
+    }
+
+    // 检测 dialogue 列表项
+    if (/^-\s*character:/.test(stripped)) {
+      inDialogue = true;
+      dialogueIndent = indent;
+      result.push(line);
+      i++;
+      continue;
+    }
+
+    // 在 dialogue 块内，检查是否退出
+    if (inDialogue && indent <= dialogueIndent) {
+      inDialogue = false;
+    }
+
+    // 在 dialogue 块内，检测并移除 actions: 块
+    if (inDialogue && /^actions:\s*$/.test(stripped)) {
+      skipUntilIndent = indent;
+      i++;
+      continue;
+    }
+
+    result.push(line);
+    i++;
+  }
+  return result.join('\n');
+}
+
 // 解析 YAML 并渲染场景卡片
 function renderSceneCards(yamlText) {
   scenePreview.innerHTML = '';
   let data;
   try {
-    data = jsyaml.load(yamlText);
-  } catch {
-    scenePreview.innerHTML = '<div style="padding:20px;color:var(--error-text);text-align:center;">YAML 解析失败，请切换到"源码"查看</div>';
+    if (typeof jsyaml === 'undefined') throw new Error('js-yaml 库未加载，请检查网络连接');
+    const fixedYaml = fixYamlCommonErrors(yamlText);
+    data = jsyaml.load(fixedYaml);
+  } catch (e) {
+    scenePreview.innerHTML = '<div style="padding:20px;color:var(--error-text);text-align:center;">YAML 解析失败: ' + escHtml(e.message) + '</div>';
     return;
   }
   if (!data || !data.scenes || !data.scenes.length) {
@@ -867,9 +944,11 @@ function renderCharCards(yamlText) {
   charPreview.innerHTML = '';
   let data;
   try {
-    data = jsyaml.load(yamlText);
-  } catch {
-    charPreview.innerHTML = '<div style="padding:20px;color:var(--error-text);text-align:center;">YAML 解析失败，请切换到"源码"查看</div>';
+    if (typeof jsyaml === 'undefined') throw new Error('js-yaml 库未加载，请检查网络连接');
+    const fixedYaml = fixYamlCommonErrors(yamlText);
+    data = jsyaml.load(fixedYaml);
+  } catch (e) {
+    charPreview.innerHTML = '<div style="padding:20px;color:var(--error-text);text-align:center;">YAML 解析失败: ' + escHtml(e.message) + '</div>';
     return;
   }
   if (!data || !data.characters || !data.characters.length) {
@@ -903,6 +982,22 @@ function renderCharCards(yamlText) {
     charPreview.appendChild(card);
   });
 }
+
+// 上传 TXT 文件
+btnUpload.addEventListener('click', () => fileInput.click());
+fileInput.addEventListener('change', () => {
+  const file = fileInput.files[0];
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = () => {
+    novelInput.value = reader.result;
+    charCount.textContent = novelInput.value.length + ' 字';
+    detectChapters();
+  };
+  reader.onerror = () => showToast('文件读取失败', 'error');
+  reader.readAsText(file, 'UTF-8');
+  fileInput.value = '';
+});
 
 // 加载示例文本
 btnSample.addEventListener('click', async () => {
