@@ -344,6 +344,153 @@ async def fix_yaml_endpoint(req: ConvertRequest):
     return {"yaml_content": fixed}
 
 
+def yaml_to_markdown(yaml_content: str) -> str:
+    """将 YAML 剧本转换为传统 Markdown 剧本格式"""
+    data = yaml.safe_load(yaml_content)
+    if not data:
+        return ""
+
+    lines = []
+    meta = data.get("meta", {})
+    title = meta.get("title", "未命名剧本")
+    source = meta.get("source_novel", "")
+    author = meta.get("author", "")
+
+    # 标题区
+    lines.append(f"# {title}")
+    lines.append("")
+    if source:
+        lines.append(f"**原著：** {source}")
+    if author:
+        lines.append(f"**作者：** {author}")
+    lines.append(f"**改编：** {meta.get('adapted_by', 'AI 改编')}")
+    lines.append("")
+    lines.append("---")
+    lines.append("")
+
+    # 角色表
+    characters = data.get("characters", [])
+    char_map = {c["id"]: c for c in characters}
+    if characters:
+        lines.append("## 角色表")
+        lines.append("")
+        for c in characters:
+            role_str = f"（{c.get('role', '')}）" if c.get("role") else ""
+            gender_str = f" {c.get('gender', '')}" if c.get("gender") else ""
+            age_str = f" {c.get('age', '')}" if c.get("age") else ""
+            lines.append(f"- **{c['name']}**{role_str}{gender_str}{age_str}")
+            if c.get("personality"):
+                lines.append(f"  性格：{c['personality']}")
+            if c.get("description"):
+                lines.append(f"  描述：{c['description']}")
+        lines.append("")
+        lines.append("---")
+        lines.append("")
+
+    # 场景
+    scenes = data.get("scenes", [])
+    for scene in scenes:
+        # 场景标题（slugline 风格）
+        location = scene.get("location", "未知地点")
+        time_str = scene.get("time", "")
+        act = scene.get("act", "")
+        scene_id = scene.get("id", "")
+
+        # 场景头
+        header = f"### {scene_id}"
+        if act:
+            header += f" — 第{act}幕"
+        lines.append(header)
+        lines.append("")
+
+        # Slugline
+        slugline = f"**{'INT.' if '内' in location or '室内' in location or '屋' in location or '厅' in location or '房' in location else 'EXT.'} {location}**"
+        if time_str:
+            slugline += f" — {time_str}"
+        lines.append(slugline)
+        lines.append("")
+
+        # 环境描写
+        if scene.get("setting"):
+            lines.append(f"*{scene['setting']}*")
+            lines.append("")
+
+        # 出场角色
+        if scene.get("characters_present"):
+            names = []
+            for cid in scene["characters_present"]:
+                names.append(char_map[cid]["name"] if cid in char_map else cid)
+            lines.append(f"**出场：** {', '.join(names)}")
+            lines.append("")
+
+        # 动作和对话交替（按原始顺序）
+        actions = scene.get("actions", [])
+        dialogues = scene.get("dialogues", [])
+        action_idx = 0
+        dialogue_idx = 0
+
+        # 为了简化，先输出所有动作，再输出所有对话
+        # （更复杂的交织需要额外标记，这里按场景内顺序展示）
+        if actions:
+            for a in actions:
+                content = a.get("content", "")
+                a_type = a.get("type", "action")
+                if a_type == "description":
+                    lines.append(f"*{content}*")
+                else:
+                    lines.append(content)
+                lines.append("")
+        if dialogues:
+            for d in dialogues:
+                char_id = d.get("character", "")
+                speaker = char_map[char_id]["name"] if char_id in char_map else char_id
+                emotion = d.get("emotion", "")
+                parenthetical = d.get("parenthetical", "")
+                action = d.get("action", "")
+                line = d.get("line", "")
+
+                # 角色名（居中加粗）
+                lines.append(f"**{speaker}**" + (f" *（{emotion}）*" if emotion else ""))
+                # 括号说明
+                if parenthetical:
+                    lines.append(f"（{parenthetical}）")
+                # 伴随动作
+                if action:
+                    lines.append(f"*[{action}]*")
+                # 台词
+                lines.append(f"> {line}")
+                lines.append("")
+
+        # 场景备注和转场
+        if scene.get("notes"):
+            lines.append(f"> 📌 {scene['notes']}")
+            lines.append("")
+        if scene.get("transition"):
+            lines.append(f"**{scene['transition']}**")
+            lines.append("")
+
+        lines.append("---")
+        lines.append("")
+
+    return "\n".join(lines)
+
+
+class MarkdownRequest(BaseModel):
+    yaml_content: str
+
+
+@app.post("/api/convert-markdown")
+async def convert_markdown(req: MarkdownRequest):
+    """将 YAML 剧本转换为 Markdown 格式"""
+    if not req.yaml_content.strip():
+        raise HTTPException(status_code=400, detail="YAML 内容不能为空")
+    try:
+        md = yaml_to_markdown(req.yaml_content)
+        return {"markdown": md, "success": True}
+    except Exception as e:
+        return {"markdown": "", "success": False, "error": str(e)}
+
+
 @app.post("/api/extract-docx")
 async def extract_docx(file: UploadFile = File(...)):
     """从 .docx 文件中提取纯文本"""
