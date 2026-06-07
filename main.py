@@ -342,6 +342,46 @@ async def health():
     return {"status": "ok"}
 
 
+# ========== 设置持久化 ==========
+
+SETTINGS_FILE = BASE_DIR / "settings.json"
+
+
+def _load_settings() -> dict:
+    if SETTINGS_FILE.exists():
+        return json.loads(SETTINGS_FILE.read_text(encoding="utf-8"))
+    return {}
+
+
+def _save_settings(data: dict):
+    SETTINGS_FILE.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+
+
+@app.get("/api/settings")
+async def get_settings():
+    settings = _load_settings()
+    # 返回时隐藏完整 key，只返回后四位
+    api_key = settings.get("api_key", "")
+    masked = ("****" + api_key[-4:]) if len(api_key) > 4 else api_key
+    return {"api_key_masked": masked, "has_key": bool(api_key)}
+
+
+@app.post("/api/settings")
+async def save_settings(req: ConvertRequest):
+    settings = _load_settings()
+    if req.api_key:
+        settings["api_key"] = req.api_key.strip()
+        _save_settings(settings)
+    return {"success": True}
+
+
+@app.get("/api/settings/key")
+async def get_api_key():
+    """返回完整的 API Key（仅内部使用）"""
+    settings = _load_settings()
+    return {"api_key": settings.get("api_key", "")}
+
+
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run(app, host="0.0.0.0", port=8000)

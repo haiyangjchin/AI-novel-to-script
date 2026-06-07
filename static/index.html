@@ -692,13 +692,33 @@ const toast = document.getElementById('toast');
 let lastChapterResult = null;  // 缓存最近一次章节检测结果
 let lastRawYaml = '';          // 缓存最近一次转换的原始 YAML
 
-// 从 localStorage 恢复 API Key
-const savedKey = localStorage.getItem('deepseek_api_key');
-if (savedKey) apiKeyInput.value = savedKey;
+// 从后端恢复 API Key（优先），localStorage 兜底
+(async () => {
+  try {
+    const resp = await fetch('/api/settings/key');
+    const data = await resp.json();
+    if (data.api_key) {
+      apiKeyInput.value = data.api_key;
+      return;
+    }
+  } catch (e) {}
+  // 后端没有则尝试 localStorage
+  const savedKey = localStorage.getItem('deepseek_api_key');
+  if (savedKey) apiKeyInput.value = savedKey;
+})();
 
-// 保存 API Key
+// 保存 API Key（同时保存到 localStorage 和后端）
+let saveKeyTimer = null;
 apiKeyInput.addEventListener('input', () => {
   localStorage.setItem('deepseek_api_key', apiKeyInput.value);
+  clearTimeout(saveKeyTimer);
+  saveKeyTimer = setTimeout(() => {
+    fetch('/api/settings', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ novel_text: '', api_key: apiKeyInput.value }),
+    }).catch(() => {});
+  }, 800);
 });
 
 // 字数统计 + 章节检测（防抖）
