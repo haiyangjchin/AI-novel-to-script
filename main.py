@@ -186,8 +186,9 @@ def detect_chapters(text: str) -> list[ChapterInfo]:
 
 @app.get("/")
 async def root():
+    import time
     from fastapi.responses import RedirectResponse
-    return RedirectResponse(url="/static/index.html")
+    return RedirectResponse(url=f"/static/index.html?v={int(time.time())}")
 
 
 @app.post("/api/detect-chapters", response_model=ChapterDetectResponse)
@@ -334,6 +335,13 @@ async def convert_novel_stream(req: ConvertRequest):
 @app.get("/api/health")
 async def health():
     return {"status": "ok"}
+
+
+@app.post("/api/fix-yaml")
+async def fix_yaml_endpoint(req: ConvertRequest):
+    """修复 LLM 生成的 YAML 中的常见结构错误"""
+    fixed = fix_yaml_common_errors(req.novel_text)
+    return {"yaml_content": fixed}
 
 
 @app.post("/api/extract-docx")
