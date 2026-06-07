@@ -199,6 +199,36 @@
     content: "转换结果将在这里显示...";
     color: #c4b8a7;
   }
+  #yaml-editor {
+    flex: 1;
+    min-height: 0;
+    width: 100%;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 16px;
+    font-family: "JetBrains Mono", "Cascadia Code", "Fira Code", "Consolas", monospace;
+    font-size: 0.82rem;
+    line-height: 1.7;
+    color: var(--text);
+    background: #fdfcf9;
+    resize: none;
+    outline: none;
+    tab-size: 2;
+  }
+  #yaml-editor:focus {
+    border-color: var(--accent);
+  }
+  #yaml-error {
+    margin-top: 8px;
+    padding: 8px 12px;
+    border-radius: 6px;
+    font-size: 0.8rem;
+    color: #b33;
+    background: #fef2f2;
+    border: 1px solid #fecaca;
+    white-space: pre-wrap;
+    word-break: break-all;
+  }
 
   /* ---- 状态提示 ---- */
   .toast {
@@ -604,12 +634,17 @@
         <button class="output-tab" id="tab-char">角色</button>
       </div>
       <div style="display:flex;gap:8px;">
+        <button class="btn btn-secondary" id="btn-edit" style="padding:6px 14px;font-size:0.82rem;" disabled>编辑</button>
         <button class="btn btn-secondary" id="btn-copy" style="padding:6px 14px;font-size:0.82rem;" disabled>复制</button>
         <button class="btn btn-secondary" id="btn-download" style="padding:6px 14px;font-size:0.82rem;" disabled>下载 YAML</button>
       </div>
     </div>
     <div class="card-body">
       <pre id="yaml-output"></pre>
+      <div id="yaml-editor-wrap" style="display:none;flex:1;min-height:0;position:relative;">
+        <textarea id="yaml-editor" spellcheck="false"></textarea>
+        <div id="yaml-error" style="display:none;"></div>
+      </div>
       <div id="scene-preview"></div>
       <div id="char-preview"></div>
     </div>
@@ -682,6 +717,10 @@ const btnUpload = document.getElementById('btn-upload');
 const fileInput = document.getElementById('file-input');
 const btnDownload = document.getElementById('btn-download');
 const btnCopy = document.getElementById('btn-copy');
+const btnEdit = document.getElementById('btn-edit');
+const yamlEditor = document.getElementById('yaml-editor');
+const yamlEditorWrap = document.getElementById('yaml-editor-wrap');
+const yamlError = document.getElementById('yaml-error');
 const charCount = document.getElementById('char-count');
 const chapterInfo = document.getElementById('chapter-info');
 const convertStatus = document.getElementById('convert-status');
@@ -787,15 +826,43 @@ function switchTab(tab) {
 }
 tabSource.addEventListener('click', () => {
   switchTab(tabSource);
+  if (isEditing) {
+    // 退出编辑模式
+    yamlEditorWrap.style.display = 'none';
+    yamlOutput.style.display = '';
+    yamlError.style.display = 'none';
+    btnEdit.textContent = '编辑';
+    btnEdit.classList.remove('btn-primary');
+    btnEdit.classList.add('btn-secondary');
+    isEditing = false;
+  }
   yamlOutput.style.display = '';
 });
 tabPreview.addEventListener('click', () => {
   switchTab(tabPreview);
+  if (isEditing) {
+    yamlEditorWrap.style.display = 'none';
+    yamlOutput.style.display = '';
+    yamlError.style.display = 'none';
+    btnEdit.textContent = '编辑';
+    btnEdit.classList.remove('btn-primary');
+    btnEdit.classList.add('btn-secondary');
+    isEditing = false;
+  }
   scenePreview.classList.add('show');
   if (lastRawYaml) renderSceneCards(lastRawYaml);
 });
 tabChar.addEventListener('click', () => {
   switchTab(tabChar);
+  if (isEditing) {
+    yamlEditorWrap.style.display = 'none';
+    yamlOutput.style.display = '';
+    yamlError.style.display = 'none';
+    btnEdit.textContent = '编辑';
+    btnEdit.classList.remove('btn-primary');
+    btnEdit.classList.add('btn-secondary');
+    isEditing = false;
+  }
   charPreview.classList.add('show');
   if (lastRawYaml) renderCharCards(lastRawYaml);
 });
@@ -1116,6 +1183,7 @@ btnConvert.addEventListener('click', async () => {
           lastRawYaml = data.yaml_content;
           btnDownload.disabled = false;
           btnCopy.disabled = false;
+          btnEdit.disabled = false;
           if (data.warning) {
             showToast(data.warning, 'error');
           } else {
@@ -1139,7 +1207,7 @@ btnConvert.addEventListener('click', async () => {
 
 // 下载 YAML
 btnDownload.addEventListener('click', () => {
-  const content = yamlOutput.textContent;
+  const content = isEditing ? yamlEditor.value : yamlOutput.textContent;
   if (!content) return;
   const blob = new Blob([content], { type: 'text/yaml;charset=utf-8' });
   const url = URL.createObjectURL(blob);
@@ -1152,7 +1220,7 @@ btnDownload.addEventListener('click', () => {
 
 // 复制到剪贴板
 btnCopy.addEventListener('click', async () => {
-  const content = yamlOutput.textContent;
+  const content = isEditing ? yamlEditor.value : yamlOutput.textContent;
   if (!content) return;
   try {
     if (navigator.clipboard && navigator.clipboard.writeText) {
@@ -1170,6 +1238,64 @@ btnCopy.addEventListener('click', async () => {
     setTimeout(() => { btnCopy.textContent = '复制'; }, 2000);
   }
 });
+
+// YAML 编辑模式切换
+let isEditing = false;
+let validateTimer = null;
+
+btnEdit.addEventListener('click', () => {
+  if (!lastRawYaml) return;
+  isEditing = !isEditing;
+  if (isEditing) {
+    // 进入编辑模式
+    yamlOutput.style.display = 'none';
+    yamlEditorWrap.style.display = 'flex';
+    yamlEditor.value = lastRawYaml;
+    yamlEditor.style.height = yamlEditorWrap.parentElement.offsetHeight + 'px';
+    btnEdit.textContent = '完成';
+    btnEdit.classList.add('btn-primary');
+    btnEdit.classList.remove('btn-secondary');
+    validateYaml();
+  } else {
+    // 退出编辑模式
+    const edited = yamlEditor.value;
+    try {
+      const cleaned = fixYamlCommonErrors(edited);
+      jsyaml.load(cleaned);
+      // 校验通过，更新内容
+      lastRawYaml = edited;
+      yamlOutput.innerHTML = highlightYaml(edited);
+    } catch (e) {
+      showToast('YAML 格式有误，已保留编辑内容', 'error');
+      lastRawYaml = edited;
+      yamlOutput.innerHTML = highlightYaml(edited);
+    }
+    yamlEditorWrap.style.display = 'none';
+    yamlOutput.style.display = '';
+    yamlError.style.display = 'none';
+    btnEdit.textContent = '编辑';
+    btnEdit.classList.remove('btn-primary');
+    btnEdit.classList.add('btn-secondary');
+  }
+});
+
+// 实时校验
+function validateYaml() {
+  clearTimeout(validateTimer);
+  validateTimer = setTimeout(() => {
+    try {
+      const cleaned = fixYamlCommonErrors(yamlEditor.value);
+      jsyaml.load(cleaned);
+      yamlError.style.display = 'none';
+      yamlEditor.style.borderColor = 'var(--accent)';
+    } catch (e) {
+      yamlError.textContent = e.message;
+      yamlError.style.display = 'block';
+      yamlEditor.style.borderColor = '#e44';
+    }
+  }, 400);
+}
+yamlEditor.addEventListener('input', validateYaml);
 
 function fallbackCopy(text) {
   const ta = document.createElement('textarea');
