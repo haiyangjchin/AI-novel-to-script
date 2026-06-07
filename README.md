@@ -8,11 +8,11 @@
 
 ---
 
-## 预览
+## 演示视频
 
-| 源码模式 | 场景预览 | 角色关系图 |
-|---------|---------|-----------|
-| ![源码模式](https://via.placeholder.com/400x250/8B5E3C/FFFFFF?text=YAML+源码) | ![场景预览](https://via.placeholder.com/400x250/C4956A/FFFFFF?text=场景卡片) | ![关系图谱](https://via.placeholder.com/400x250/734D30/FFFFFF?text=关系图谱) |
+<video src="video.mp4" controls width="100%" style="max-width:800px;border-radius:12px;box-shadow:0 4px 24px rgba(0,0,0,0.1);">
+  您的浏览器不支持 video 标签，请 <a href="video.mp4">下载视频文件</a> 观看。
+</video>
 
 ---
 
