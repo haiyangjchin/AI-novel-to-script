@@ -1713,6 +1713,8 @@ btnDownload.addEventListener('click', (e) => {
 // 点击外部关闭下拉菜单
 document.addEventListener('click', () => {
   downloadMenu.style.display = 'none';
+});
+
 // 逐章转换（SSE 流式，按章节分步处理）
 btnConvertChapters.addEventListener('click', async () => {
   const text = novelInput.value.trim();
