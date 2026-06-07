@@ -19,6 +19,16 @@ app = FastAPI(title="AI 小说转剧本工具")
 app.mount("/static", StaticFiles(directory=str(BASE_DIR / "static")), name="static")
 app.mount("/sample", StaticFiles(directory=str(BASE_DIR / "sample")), name="sample")
 
+
+@app.middleware("http")
+async def no_cache_static(request, call_response):
+    response = await call_response(request)
+    if "/static/" in str(request.url.path):
+        response.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
+        response.headers["Pragma"] = "no-cache"
+        response.headers["Expires"] = "0"
+    return response
+
 # LLM 客户端（从环境变量读取配置，默认使用 DeepSeek）
 client = OpenAI(
     api_key=os.getenv("DEEPSEEK_API_KEY", "sk-placeholder"),
@@ -186,8 +196,9 @@ def detect_chapters(text: str) -> list[ChapterInfo]:
 
 @app.get("/")
 async def root():
+    import time
     from fastapi.responses import RedirectResponse
-    return RedirectResponse(url="/static/index.html")
+    return RedirectResponse(url=f"/static/index.html?v={int(time.time())}")
 
 
 @app.post("/api/detect-chapters", response_model=ChapterDetectResponse)
