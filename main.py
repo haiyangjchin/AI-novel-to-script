@@ -111,106 +111,49 @@ class ChapterDetectResponse(BaseModel):
 def fix_yaml_common_errors(raw_yaml: str) -> str:
     """修复 LLM 生成的 YAML 中的常见结构错误
 
-    策略：正向逐行扫描，用状态机追踪当前是否在 dialogue 块内。
-    dialogue 块由 `- character: xxx` 开始，到下一个同级或更浅缩进的非 character 行结束。
-    在 dialogue 块内，直接丢弃 `actions:` 及其子项。
+    单 pass 状态机：正向逐行扫描，追踪 dialogue 上下文。
+    遇到 dialogue 内的 actions: 时，跳过该行及其所有更深缩进的子项。
     """
     import re
 
     lines = raw_yaml.split('\n')
     result = []
-
-    # 状态：当前是否在 dialogue 块内，以及 dialogue 的缩进层级
     in_dialogue = False
-    dialogue_indent = 0  # - character: 行的缩进
+    dialogue_indent = 0
+    skip_indent = -1  # > 0 时跳过所有缩进更深的行
 
     for line in lines:
         stripped = line.lstrip()
         indent = len(line) - len(stripped) if stripped else -1
 
-        # 空行：保持原样
+        # 空行保持原样
         if not stripped:
             result.append(line)
-            continue
-
-        # 检测 dialogue 列表项开始
-        if re.match(r'-\s*character:', stripped):
-            in_dialogue = True
-            dialogue_indent = indent
-            result.append(line)
-            continue
-
-        # 在 dialogue 块内，检查是否退出
-        if in_dialogue:
-            # 如果当前行缩进 <= dialogue 缩进，说明退出了 dialogue 块
-            if indent <= dialogue_indent:
-                in_dialogue = False
-                # 注意：不 continue，下面会正常处理此行
-
-            # 在 dialogue 块内，丢弃 actions: 块
-            if in_dialogue and re.match(r'actions:\s*$', stripped):
-                # 跳过 actions: 的所有子行（缩进更深的行）
-                actions_indent = indent
-                # 不输出 actions: 行本身
-                continue
-
-            # 在 dialogue 块内，丢弃 actions 的子行（通过检测后续行的缩进）
-            # 这个逻辑由上面的 actions: 处理跳过，不需要额外处理
-            # 但需要处理 actions 子项的行——这些行缩进比 actions: 更深
-            # 由于我们不保存 actions_indent 状态，用简单方式：
-            # 如果上一行被跳过了（actions:），这一行如果是更深缩进也跳过
-            # 这里用一个标记来跟踪
-
-        result.append(line)
-
-    # 上面的逻辑有问题：跳过 actions: 后，其子行仍然会被输出
-    # 需要一个更清晰的状态机
-
-    # 重新实现：双 pass 方式
-    result = []
-    i = 0
-    in_dialogue = False
-    dialogue_indent = 0
-    skip_until_indent = -1  # 如果 > 0，跳过所有缩进 > 此值的行
-
-    while i < len(lines):
-        line = lines[i]
-        stripped = line.lstrip()
-        indent = len(line) - len(stripped) if stripped else -1
-
-        if not stripped:
-            result.append(line)
-            i += 1
             continue
 
         # 正在跳过 actions 子行
-        if skip_until_indent >= 0:
-            if indent > skip_until_indent:
-                i += 1
-                continue
-            else:
-                skip_until_indent = -1  # 停止跳过
+        if skip_indent >= 0:
+            if indent > skip_indent:
+                continue  # 跳过
+            skip_indent = -1  # 缩进回到同级或更浅，停止跳过
 
         # 检测 dialogue 列表项
         if re.match(r'-\s*character:', stripped):
             in_dialogue = True
             dialogue_indent = indent
             result.append(line)
-            i += 1
             continue
 
-        # 在 dialogue 块内，检查是否退出
+        # 检查是否退出 dialogue 块
         if in_dialogue and indent <= dialogue_indent:
             in_dialogue = False
 
-        # 在 dialogue 块内，检测并移除 actions: 块
+        # 在 dialogue 块内，移除 actions: 及其子项
         if in_dialogue and re.match(r'actions:\s*$', stripped):
-            skip_until_indent = indent  # 跳过所有更深缩进的行
-            i += 1
+            skip_indent = indent  # 标记跳过后续更深缩进的行
             continue
 
         result.append(line)
-        i += 1
 
     return '\n'.join(result)
 

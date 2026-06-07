@@ -798,27 +798,25 @@ tabChar.addEventListener('click', () => {
 });
 
 // 修复 LLM 生成的 YAML 中的常见结构错误
-// 策略：正向状态机追踪 dialogue 上下文，移除 dialogue 内的 actions: 块
+// 单 pass 状态机：追踪 dialogue 上下文，移除 dialogue 内的 actions: 及其子项
 function fixYamlCommonErrors(yamlText) {
   const lines = yamlText.split('\n');
   const result = [];
-  let i = 0;
   let inDialogue = false;
   let dialogueIndent = 0;
-  let skipUntilIndent = -1; // > 0 时跳过所有缩进更深的行
+  let skipIndent = -1; // > 0 时跳过所有缩进更深的行
 
-  while (i < lines.length) {
-    const line = lines[i];
+  for (const line of lines) {
     const stripped = line.replace(/^\s+/, '');
     const indent = stripped ? line.length - stripped.length : -1;
 
     // 空行保持原样
-    if (!stripped) { result.push(line); i++; continue; }
+    if (!stripped) { result.push(line); continue; }
 
     // 正在跳过 actions 子行
-    if (skipUntilIndent >= 0) {
-      if (indent > skipUntilIndent) { i++; continue; }
-      skipUntilIndent = -1; // 停止跳过
+    if (skipIndent >= 0) {
+      if (indent > skipIndent) continue;
+      skipIndent = -1;
     }
 
     // 检测 dialogue 列表项
@@ -826,24 +824,21 @@ function fixYamlCommonErrors(yamlText) {
       inDialogue = true;
       dialogueIndent = indent;
       result.push(line);
-      i++;
       continue;
     }
 
-    // 在 dialogue 块内，检查是否退出
+    // 检查是否退出 dialogue 块
     if (inDialogue && indent <= dialogueIndent) {
       inDialogue = false;
     }
 
-    // 在 dialogue 块内，检测并移除 actions: 块
+    // 在 dialogue 块内，移除 actions: 及其子项
     if (inDialogue && /^actions:\s*$/.test(stripped)) {
-      skipUntilIndent = indent;
-      i++;
+      skipIndent = indent;
       continue;
     }
 
     result.push(line);
-    i++;
   }
   return result.join('\n');
 }
