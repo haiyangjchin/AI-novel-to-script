@@ -1,9 +1,10 @@
+import io
 import json
 import os
 import re
 import yaml
 from pathlib import Path
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, File, HTTPException, UploadFile
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel
@@ -390,6 +391,22 @@ async def convert_novel_stream(req: ConvertRequest):
 @app.get("/api/health")
 async def health():
     return {"status": "ok"}
+
+
+@app.post("/api/extract-docx")
+async def extract_docx(file: UploadFile = File(...)):
+    """从 .docx 文件中提取纯文本"""
+    if not file.filename.endswith('.docx'):
+        raise HTTPException(status_code=400, detail="仅支持 .docx 文件")
+
+    try:
+        from docx import Document
+        content = await file.read()
+        doc = Document(io.BytesIO(content))
+        text = '\n'.join(p.text for p in doc.paragraphs)
+        return {"text": text, "filename": file.filename}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"文件解析失败: {str(e)}")
 
 
 # ========== 设置持久化 ==========
