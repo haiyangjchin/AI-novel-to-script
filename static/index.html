@@ -699,6 +699,28 @@
   .dropdown-item:hover {
     background: var(--tag-bg) !important;
     color: var(--accent) !important;
+  /* ---- 逐章转换进度 ---- */
+  .chapter-progress {
+    margin-top: 10px;
+    padding: 10px 0;
+  }
+  .progress-bar-bg {
+    width: 100%;
+    height: 6px;
+    background: var(--border);
+    border-radius: 3px;
+    overflow: hidden;
+  }
+  .progress-bar-fill {
+    height: 100%;
+    background: var(--accent);
+    border-radius: 3px;
+    transition: width 0.3s ease;
+  }
+  .progress-text {
+    font-size: 0.78rem;
+    color: var(--text-secondary);
+    margin-top: 6px;
   }
 
   /* ---- YAML key 高亮 ---- */
@@ -739,7 +761,17 @@
           <span class="btn-text">转换为剧本</span>
           <span class="spinner"></span>
         </button>
+        <button class="btn btn-secondary" id="btn-convert-chapters" style="display:none;">
+          <span class="btn-text">📖 逐章转换</span>
+          <span class="spinner"></span>
+        </button>
         <span class="convert-status" id="convert-status"></span>
+      </div>
+      <div class="chapter-progress" id="chapter-progress" style="display:none;">
+        <div class="progress-bar-bg">
+          <div class="progress-bar-fill" id="progress-fill" style="width:0%"></div>
+        </div>
+        <div class="progress-text" id="progress-text">准备中...</div>
       </div>
     </div>
   </div>
@@ -938,18 +970,27 @@ async function detectChapters() {
   }
 }
 
+const btnConvertChapters = document.getElementById('btn-convert-chapters');
+const chapterProgress = document.getElementById('chapter-progress');
+const progressFill = document.getElementById('progress-fill');
+const progressText = document.getElementById('progress-text');
+
 function updateConvertStatus() {
   if (!lastChapterResult || lastChapterResult.count === 0) {
     convertStatus.className = 'convert-status';
     convertStatus.textContent = '';
+    btnConvertChapters.style.display = 'none';
     return;
   }
   if (lastChapterResult.meets_minimum) {
     convertStatus.className = 'convert-status show ok';
     convertStatus.textContent = '✓ ' + lastChapterResult.count + ' 章，可以转换';
+    // 5 章以上显示逐章转换按钮
+    btnConvertChapters.style.display = lastChapterResult.count >= 5 ? '' : 'none';
   } else {
     convertStatus.className = 'convert-status show warn';
     convertStatus.textContent = '⚠ 仅 ' + lastChapterResult.count + ' 章，至少需要 3 章';
+    btnConvertChapters.style.display = 'none';
   }
 }
 
@@ -1388,6 +1429,105 @@ btnDownload.addEventListener('click', (e) => {
 // 点击外部关闭下拉菜单
 document.addEventListener('click', () => {
   downloadMenu.style.display = 'none';
+// 逐章转换（SSE 流式，按章节分步处理）
+btnConvertChapters.addEventListener('click', async () => {
+  const text = novelInput.value.trim();
+  if (!text) {
+    showToast('请先输入小说文本', 'error');
+    return;
+  }
+
+  if (!lastChapterResult) {
+    await detectChapters();
+  }
+  if (!lastChapterResult || !lastChapterResult.meets_minimum) {
+    showToast('至少需要 3 章小说内容才能转换', 'error');
+    return;
+  }
+
+  btnConvertChapters.classList.add('loading');
+  btnConvertChapters.disabled = true;
+  btnConvert.disabled = true;
+  yamlOutput.textContent = '';
+  scenePreview.innerHTML = '';
+  charPreview.innerHTML = '';
+  lastRawYaml = '';
+  switchTab(tabSource);
+  yamlOutput.style.display = '';
+
+  // 显示进度条
+  chapterProgress.style.display = '';
+  progressFill.style.width = '0%';
+  progressText.textContent = '准备中...';
+
+  let chapterResults = [];
+
+  try {
+    const resp = await fetch('/api/convert-chapters', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ novel_text: text, api_key: apiKeyInput.value }),
+    });
+
+    if (!resp.ok) {
+      const err = await resp.json();
+      throw new Error(err.detail || '请求失败');
+    }
+
+    const reader = resp.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = '';
+
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+
+      buffer += decoder.decode(value, { stream: true });
+      const lines = buffer.split('\n');
+      buffer = lines.pop();
+
+      for (const line of lines) {
+        if (!line.startsWith('data: ')) continue;
+        const data = JSON.parse(line.slice(6));
+
+        if (data.type === 'start') {
+          progressText.textContent = `共 ${data.total} 章，开始转换...`;
+        } else if (data.type === 'chapter_start') {
+          const pct = ((data.index - 1) / data.total * 100).toFixed(0);
+          progressFill.style.width = pct + '%';
+          progressText.textContent = `正在转换第 ${data.index}/${data.total} 章：${data.title}`;
+          yamlOutput.textContent += `\n--- 第 ${data.index} 章：${data.title} ---\n`;
+          yamlOutput.scrollTop = yamlOutput.scrollHeight;
+        } else if (data.type === 'chapter_done') {
+          chapterResults.push(data.yaml);
+          yamlOutput.textContent += `✓ 完成\n`;
+          yamlOutput.scrollTop = yamlOutput.scrollHeight;
+        } else if (data.type === 'chapter_error') {
+          yamlOutput.textContent += `✗ 失败: ${data.error}\n`;
+          yamlOutput.scrollTop = yamlOutput.scrollHeight;
+        } else if (data.type === 'done') {
+          progressFill.style.width = '100%';
+          progressText.textContent = `全部完成！共 ${data.chapter_count} 章转换成功`;
+          lastRawYaml = data.yaml_content;
+          yamlOutput.innerHTML = highlightYaml(data.yaml_content);
+          btnDownload.disabled = false;
+          btnCopy.disabled = false;
+          btnEdit.disabled = false;
+          showToast(`逐章转换完成！共 ${data.chapter_count} 章`, 'success');
+        } else if (data.type === 'error') {
+          showToast('转换失败: ' + data.message, 'error');
+        }
+      }
+    }
+  } catch (e) {
+    showToast('请求失败: ' + e.message, 'error');
+  } finally {
+    btnConvertChapters.classList.remove('loading');
+    btnConvertChapters.disabled = false;
+    btnConvert.disabled = false;
+    // 3 秒后隐藏进度条
+    setTimeout(() => { chapterProgress.style.display = 'none'; }, 3000);
+  }
 });
 
 // 下载 YAML

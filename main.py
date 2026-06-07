@@ -332,6 +332,179 @@ async def convert_novel_stream(req: ConvertRequest):
     )
 
 
+CHAPTER_CONVERT_PROMPT = """你是一位资深的剧本分析师，擅长将小说文本转换为专业的结构化剧本。
+
+你需要将用户提供的小说章节内容转换为 YAML 格式的剧本。请严格按照以下规则执行：
+
+1. **角色提取**：识别所有出场角色，为每个角色分配唯一 id（CHAR_01, CHAR_02...），提取姓名、性别、年龄、性格特征、外貌描述，并分析角色之间的关系。
+2. **场景划分**：根据地点变化和时间推进划分场景，每个场景包含完整的 actions 和 dialogues。
+3. **对话提取**：将原文中的对话逐句提取，标注说话角色、情绪语气、括号说明。
+4. **动作描写**：将原文中的动作和环境描写转换为 actions 数组。
+5. **字段归属规则**：actions（数组）只在场景级别，action（字符串）只在对话级别。
+6. **输出格式**：只输出有效的 YAML，不要有任何额外文字。YAML 结构必须符合以下模板：
+
+characters:
+  - id: "CHAR_01"
+    name: "角色名"
+    aliases: []
+    gender: "男/女"
+    age: "年龄描述"
+    role: "主角/配角/反派/龙套"
+    personality: "性格特征"
+    description: "外貌及背景描述"
+    relationships: []
+scenes:
+  - id: "S01"
+    act: 1
+    location: "场景地点"
+    time: "场景时间"
+    setting: "环境描述"
+    characters_present: ["CHAR_01"]
+    actions:
+      - type: "description"
+        content: "环境描写内容"
+      - type: "action"
+        content: "动作描写内容"
+    dialogues:
+      - character: "CHAR_01"
+        line: "台词原文"
+        emotion: "正常/激动/低沉/..."
+        parenthetical: "表演提示"
+        action: "伴随动作"
+    notes: ""
+    transition: "CUT TO:"
+
+确保输出的 YAML 可以被 yaml.safe_load 解析。"""
+
+
+def split_text_by_chapters(text: str, chapters: list[ChapterInfo]) -> list[tuple[str, str]]:
+    """将文本按章节拆分，返回 [(chapter_title, chapter_text), ...]"""
+    result = []
+    for i, ch in enumerate(chapters):
+        start = ch.start_pos
+        end = chapters[i + 1].start_pos if i + 1 < len(chapters) else len(text)
+        chapter_text = text[start:end].strip()
+        if chapter_text:
+            result.append((ch.title, chapter_text))
+    return result
+
+
+def merge_chapter_yamls(yamls: list[str]) -> str:
+    """将多章的 YAML 合并为一个完整的 YAML"""
+    all_characters = {}
+    all_scenes = []
+    meta = {}
+
+    for yml_str in yamls:
+        try:
+            data = yaml.safe_load(yml_str)
+        except Exception:
+            continue
+        if not data:
+            continue
+
+        # 合并 meta（取第一个）
+        if not meta and data.get("meta"):
+            meta = data["meta"]
+
+        # 合并角色（去重，以 id 为准）
+        for c in data.get("characters", []):
+            cid = c.get("id", "")
+            if cid and cid not in all_characters:
+                all_characters[cid] = c
+
+        # 合并场景（重新编号）
+        for s in data.get("scenes", []):
+            all_scenes.append(s)
+
+    # 重新编号场景 id
+    for i, scene in enumerate(all_scenes):
+        scene["id"] = f"S{i + 1:02d}"
+
+    merged = {
+        "meta": meta or {"title": "合并剧本", "adapted_by": "AI 改编"},
+        "characters": list(all_characters.values()),
+        "scenes": all_scenes,
+    }
+    return yaml.dump(merged, allow_unicode=True, default_flow_style=False, sort_keys=False)
+
+
+@app.post("/api/convert-chapters")
+async def convert_chapters_stream(req: ConvertRequest):
+    """按章节逐一转换小说文本（SSE 流式输出）"""
+    if not req.novel_text.strip():
+        raise HTTPException(status_code=400, detail="小说文本不能为空")
+
+    chapters = detect_chapters(req.novel_text)
+    if len(chapters) < 3:
+        raise HTTPException(status_code=400, detail=f"检测到 {len(chapters)} 章，至少需要 3 章")
+
+    api_key = req.api_key.strip() or client.api_key
+    if api_key == "sk-placeholder":
+        raise HTTPException(status_code=400, detail="请先设置 DeepSeek API Key")
+
+    req_client = OpenAI(api_key=api_key, base_url=str(client.base_url))
+    chapter_texts = split_text_by_chapters(req.novel_text, chapters)
+
+    async def generate():
+        try:
+            yield f"data: {json.dumps({'type': 'start', 'total': len(chapter_texts)})}\n\n"
+
+            results = []
+            for i, (title, text) in enumerate(chapter_texts):
+                yield f"data: {json.dumps({'type': 'chapter_start', 'index': i + 1, 'title': title, 'total': len(chapter_texts)})}\n\n"
+
+                try:
+                    response = req_client.chat.completions.create(
+                        model=LLM_MODEL,
+                        messages=[
+                            {"role": "system", "content": CHAPTER_CONVERT_PROMPT},
+                            {"role": "user", "content": f"请将以下小说章节转换为剧本 YAML：\n\n{text}"},
+                        ],
+                        temperature=0.3,
+                        max_tokens=8192,
+                    )
+
+                    raw = response.choices[0].message.content.strip()
+
+                    # 清理 markdown 代码块
+                    if raw.startswith("```"):
+                        lines = raw.split("\n")
+                        if lines[0].startswith("```"):
+                            lines = lines[1:]
+                        if lines and lines[-1].strip() == "```":
+                            lines = lines[:-1]
+                        raw = "\n".join(lines)
+
+                    raw = fix_yaml_common_errors(raw)
+                    yaml.safe_load(raw)  # 验证
+                    results.append(raw)
+
+                    yield f"data: {json.dumps({'type': 'chapter_done', 'index': i + 1, 'title': title, 'yaml': raw})}\n\n"
+
+                except Exception as e:
+                    yield f"data: {json.dumps({'type': 'chapter_error', 'index': i + 1, 'title': title, 'error': str(e)})}\n\n"
+
+            # 合并所有章节
+            merged = merge_chapter_yamls(results)
+            yaml.safe_load(merged)  # 验证合并结果
+
+            yield f"data: {json.dumps({'type': 'done', 'yaml_content': merged, 'chapter_count': len(results)})}\n\n"
+
+        except Exception as e:
+            yield f"data: {json.dumps({'type': 'error', 'message': str(e)})}\n\n"
+
+    return StreamingResponse(
+        generate(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
+    )
+
+
 @app.get("/api/health")
 async def health():
     return {"status": "ok"}
