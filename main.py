@@ -111,51 +111,109 @@ class ChapterDetectResponse(BaseModel):
 def fix_yaml_common_errors(raw_yaml: str) -> str:
     """修复 LLM 生成的 YAML 中的常见结构错误
 
-    单 pass 状态机：正向逐行扫描，追踪 dialogue 上下文。
-    遇到 dialogue 内的 actions: 时，跳过该行及其所有更深缩进的子项。
+    Pass 1: 移除 dialogue 块内的 actions:（LLM 常把 action 误写为 actions 数组）
+    Pass 2: 移除同层级重复的 mapping key（LLM 常在 scene 级别生成重复 actions:）
     """
     import re
 
     lines = raw_yaml.split('\n')
-    result = []
+
+    # === Pass 1: 移除 dialogue 块内的 actions: ===
+    pass1 = []
     in_dialogue = False
     dialogue_indent = 0
-    skip_indent = -1  # > 0 时跳过所有缩进更深的行
+    skip_indent = -1
+    skipping = False
 
     for line in lines:
         stripped = line.lstrip()
         indent = len(line) - len(stripped) if stripped else -1
 
-        # 空行保持原样
         if not stripped:
-            result.append(line)
+            pass1.append(line)
             continue
 
-        # 正在跳过 actions 子行
-        if skip_indent >= 0:
+        if skipping:
             if indent > skip_indent:
-                continue  # 跳过
-            skip_indent = -1  # 缩进回到同级或更浅，停止跳过
+                continue
+            if indent == skip_indent and stripped.startswith('- '):
+                continue  # 同级列表项，继续跳过
+            skipping = False
 
-        # 检测 dialogue 列表项
         if re.match(r'-\s*character:', stripped):
             in_dialogue = True
             dialogue_indent = indent
-            result.append(line)
+            pass1.append(line)
             continue
 
-        # 检查是否退出 dialogue 块
         if in_dialogue and indent <= dialogue_indent:
             in_dialogue = False
 
-        # 在 dialogue 块内，移除 actions: 及其子项
-        if in_dialogue and re.match(r'actions:\s*$', stripped):
-            skip_indent = indent  # 标记跳过后续更深缩进的行
+        # 识别 dialogue 内的 actions:（支持大小写、引号、注释）
+        if in_dialogue:
+            line_no_comment = re.sub(r'#.*$', '', stripped).strip()
+            if re.match(r'^["\']?[Aa]ctions["\']?:\s*$', line_no_comment):
+                skip_indent = indent
+                skipping = True
+                continue
+
+        pass1.append(line)
+
+    # === Pass 2: 移除同层级重复的 mapping key ===
+    pass2 = []
+    seen_at_indent = {}  # {indent: set(key_names)}
+    i = 0
+    while i < len(pass1):
+        line = pass1[i]
+        stripped = line.lstrip()
+        if not stripped:
+            pass2.append(line)
+            i += 1
+            continue
+        indent = len(line) - len(stripped)
+
+        # 新的列表项 — 清除更深层级的 seen 记录（属于不同列表项的 key 不应互相比较）
+        if re.match(r'-\s', stripped):
+            for k in list(seen_at_indent.keys()):
+                if k > indent:
+                    del seen_at_indent[k]
+            pass2.append(line)
+            i += 1
             continue
 
-        result.append(line)
+        # 检测 mapping key（普通 key 或引号括起的 key）
+        key_match = re.match(r'^(?:"([^"]+)"|([\w一-鿿_-]+))\s*:', stripped)
+        if key_match:
+            key = key_match.group(1) or key_match.group(2)
+            if indent not in seen_at_indent:
+                seen_at_indent[indent] = set()
 
-    return '\n'.join(result)
+            if key in seen_at_indent[indent]:
+                # 重复 key！跳过该行及其所有子行（含同级列表项）
+                i += 1
+                while i < len(pass1):
+                    s = pass1[i].lstrip()
+                    if not s:
+                        i += 1
+                        continue
+                    d = len(pass1[i]) - len(s)
+                    if d < indent:
+                        break  # 缩进变浅 → 新映射块开始
+                    if d == indent and not s.startswith('- '):
+                        break  # 同缩进且非列表项 → 新 mapping key
+                    i += 1
+                # 清理被跳过区域留下的深层级 seen 记录，避免后续误判
+                for k in list(seen_at_indent.keys()):
+                    if k > indent:
+                        del seen_at_indent[k]
+                continue
+
+            seen_at_indent[indent].add(key)
+
+        pass2.append(line)
+        i += 1
+
+    return '\n'.join(pass2)
 
 
 CHAPTER_PATTERNS = [
@@ -543,7 +601,10 @@ def yaml_to_markdown(yaml_content: str) -> str:
 
     # 角色表
     characters = data.get("characters", [])
-    char_map = {c["id"]: c for c in characters}
+    char_map = {}
+    for c in characters:
+        if isinstance(c, dict) and "id" in c:
+            char_map[c["id"]] = c
     if characters:
         lines.append("## 角色表")
         lines.append("")
