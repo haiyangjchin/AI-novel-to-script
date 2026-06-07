@@ -33,8 +33,8 @@
     background: var(--bg);
     color: var(--text);
     line-height: 1.6;
-    height: 100vh;
-    overflow: hidden;
+    min-height: 100vh;
+    overflow-y: auto;
     display: flex;
     flex-direction: column;
   }
@@ -78,9 +78,9 @@
     display: grid;
     grid-template-columns: 1fr 1fr;
     gap: 28px;
+    flex-shrink: 0;
     height: calc(100vh - 80px);
     min-height: 0;
-    overflow: hidden;
   }
 
   @media (max-width: 900px) {
@@ -198,6 +198,36 @@
   #yaml-output:empty::after {
     content: "转换结果将在这里显示...";
     color: #c4b8a7;
+  }
+  #yaml-editor {
+    flex: 1;
+    min-height: 0;
+    width: 100%;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 16px;
+    font-family: "JetBrains Mono", "Cascadia Code", "Fira Code", "Consolas", monospace;
+    font-size: 0.82rem;
+    line-height: 1.7;
+    color: var(--text);
+    background: #fdfcf9;
+    resize: none;
+    outline: none;
+    tab-size: 2;
+  }
+  #yaml-editor:focus {
+    border-color: var(--accent);
+  }
+  #yaml-error {
+    margin-top: 8px;
+    padding: 8px 12px;
+    border-radius: 6px;
+    font-size: 0.8rem;
+    color: #b33;
+    background: #fef2f2;
+    border: 1px solid #fecaca;
+    white-space: pre-wrap;
+    word-break: break-all;
   }
 
   /* ---- 状态提示 ---- */
@@ -552,6 +582,120 @@
   .badge-ok { background: #dcfce7; color: #166534; }
   .badge-warn { background: #fef3c7; color: #92400e; }
 
+  /* ---- 历史记录 ---- */
+  .history-section {
+    position: relative; z-index: 1;
+    max-width: 1500px;
+    width: 90%;
+    margin: 0 auto;
+    padding: 0 0 24px;
+  }
+  .history-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 12px 0;
+    cursor: pointer;
+    user-select: none;
+  }
+  .history-header h3 {
+    font-size: 0.95rem;
+    font-weight: 600;
+    color: var(--text);
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+  .history-header .toggle-arrow {
+    font-size: 0.8rem;
+    color: var(--text-secondary);
+    transition: transform 0.2s;
+  }
+  .history-header .toggle-arrow.open { transform: rotate(180deg); }
+  .history-count {
+    font-size: 0.75rem;
+    background: var(--tag-bg);
+    color: var(--text-secondary);
+    padding: 2px 8px;
+    border-radius: 10px;
+    font-weight: 500;
+  }
+  .history-list {
+    display: none;
+    flex-direction: column;
+    gap: 8px;
+    max-height: 300px;
+    overflow-y: auto;
+    padding-bottom: 8px;
+  }
+  .history-list.show { display: flex; }
+  .history-item {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 10px 14px;
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    cursor: pointer;
+    transition: all 0.2s;
+  }
+  .history-item:hover {
+    border-color: var(--accent);
+    box-shadow: var(--shadow);
+  }
+  .history-item-content { flex: 1; min-width: 0; }
+  .history-item-summary {
+    font-size: 0.82rem;
+    color: var(--text);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .history-item-time {
+    font-size: 0.73rem;
+    color: var(--text-secondary);
+    margin-top: 2px;
+  }
+  .history-item-delete {
+    font-size: 0.78rem;
+    color: var(--text-secondary);
+    cursor: pointer;
+    padding: 4px 8px;
+    border-radius: 4px;
+    border: none;
+    background: none;
+    font-family: inherit;
+    transition: all 0.2s;
+    flex-shrink: 0;
+  }
+  .history-item-delete:hover {
+    background: var(--error-bg);
+    color: var(--error-text);
+  }
+  .history-empty {
+    font-size: 0.82rem;
+    color: var(--text-secondary);
+    text-align: center;
+    padding: 16px;
+  }
+  .history-clear {
+    font-size: 0.78rem;
+    color: var(--text-secondary);
+    cursor: pointer;
+    padding: 4px 10px;
+    border-radius: 4px;
+    border: 1px solid var(--border);
+    background: var(--card);
+    font-family: inherit;
+    transition: all 0.2s;
+  }
+  .history-clear:hover {
+    background: var(--error-bg);
+    color: var(--error-text);
+    border-color: var(--error-border);
+  }
+
   /* ---- YAML key 高亮 ---- */
   .yaml-key { color: #b8753b; }
   .yaml-string { color: #166534; }
@@ -604,17 +748,34 @@
         <button class="output-tab" id="tab-char">角色</button>
       </div>
       <div style="display:flex;gap:8px;">
+        <button class="btn btn-secondary" id="btn-edit" style="padding:6px 14px;font-size:0.82rem;" disabled>编辑</button>
         <button class="btn btn-secondary" id="btn-copy" style="padding:6px 14px;font-size:0.82rem;" disabled>复制</button>
         <button class="btn btn-secondary" id="btn-download" style="padding:6px 14px;font-size:0.82rem;" disabled>下载 YAML</button>
       </div>
     </div>
     <div class="card-body">
       <pre id="yaml-output"></pre>
+      <div id="yaml-editor-wrap" style="display:none;flex:1;min-height:0;position:relative;">
+        <textarea id="yaml-editor" spellcheck="false"></textarea>
+        <div id="yaml-error" style="display:none;"></div>
+      </div>
       <div id="scene-preview"></div>
       <div id="char-preview"></div>
     </div>
   </div>
 
+</div>
+
+<!-- 历史记录 -->
+<div class="history-section" id="history-section" style="display:none;">
+  <div class="history-header" id="history-header">
+    <h3>📋 历史记录 <span class="history-count" id="history-count">0</span></h3>
+    <div style="display:flex;align-items:center;gap:8px;">
+      <button class="history-clear" id="history-clear">清空全部</button>
+      <span class="toggle-arrow" id="history-arrow">▼</span>
+    </div>
+  </div>
+  <div class="history-list" id="history-list"></div>
 </div>
 
 <div class="toast" id="toast"></div>
@@ -682,6 +843,10 @@ const btnUpload = document.getElementById('btn-upload');
 const fileInput = document.getElementById('file-input');
 const btnDownload = document.getElementById('btn-download');
 const btnCopy = document.getElementById('btn-copy');
+const btnEdit = document.getElementById('btn-edit');
+const yamlEditor = document.getElementById('yaml-editor');
+const yamlEditorWrap = document.getElementById('yaml-editor-wrap');
+const yamlError = document.getElementById('yaml-error');
 const charCount = document.getElementById('char-count');
 const chapterInfo = document.getElementById('chapter-info');
 const convertStatus = document.getElementById('convert-status');
@@ -787,73 +952,122 @@ function switchTab(tab) {
 }
 tabSource.addEventListener('click', () => {
   switchTab(tabSource);
+  if (isEditing) {
+    // 退出编辑模式
+    yamlEditorWrap.style.display = 'none';
+    yamlOutput.style.display = '';
+    yamlError.style.display = 'none';
+    btnEdit.textContent = '编辑';
+    btnEdit.classList.remove('btn-primary');
+    btnEdit.classList.add('btn-secondary');
+    isEditing = false;
+  }
   yamlOutput.style.display = '';
 });
 tabPreview.addEventListener('click', () => {
   switchTab(tabPreview);
+  if (isEditing) {
+    yamlEditorWrap.style.display = 'none';
+    yamlOutput.style.display = '';
+    yamlError.style.display = 'none';
+    btnEdit.textContent = '编辑';
+    btnEdit.classList.remove('btn-primary');
+    btnEdit.classList.add('btn-secondary');
+    isEditing = false;
+  }
   scenePreview.classList.add('show');
   if (lastRawYaml) renderSceneCards(lastRawYaml);
 });
 tabChar.addEventListener('click', () => {
   switchTab(tabChar);
+  if (isEditing) {
+    yamlEditorWrap.style.display = 'none';
+    yamlOutput.style.display = '';
+    yamlError.style.display = 'none';
+    btnEdit.textContent = '编辑';
+    btnEdit.classList.remove('btn-primary');
+    btnEdit.classList.add('btn-secondary');
+    isEditing = false;
+  }
   charPreview.classList.add('show');
   if (lastRawYaml) renderCharCards(lastRawYaml);
 });
 
 // 修复 LLM 生成的 YAML 中的常见结构错误
-// 单 pass 状态机：追踪 dialogue 上下文，移除 dialogue 内的 actions: 及其子项
 function fixYamlCommonErrors(yamlText) {
   const lines = yamlText.split('\n');
-  const result = [];
+  const output = [];
   let inDialogue = false;
   let dialogueIndent = 0;
-  let skipIndent = -1; // > 0 时跳过所有缩进更深的行
+  let skipIndent = -1;
 
   for (const line of lines) {
     const stripped = line.replace(/^\s+/, '');
     const indent = stripped ? line.length - stripped.length : -1;
 
-    // 空行保持原样
-    if (!stripped) { result.push(line); continue; }
+    if (!stripped) { output.push(line); continue; }
 
-    // 正在跳过 actions 子行
     if (skipIndent >= 0) {
       if (indent > skipIndent) continue;
       skipIndent = -1;
     }
 
-    // 检测 dialogue 列表项
     if (/^-\s*character:/.test(stripped)) {
       inDialogue = true;
       dialogueIndent = indent;
-      result.push(line);
+      output.push(line);
       continue;
     }
 
-    // 检查是否退出 dialogue 块
     if (inDialogue && indent <= dialogueIndent) {
       inDialogue = false;
     }
 
-    // 在 dialogue 块内，移除 actions: 及其子项
     if (inDialogue && /^actions:\s*$/.test(stripped)) {
       skipIndent = indent;
       continue;
     }
 
-    result.push(line);
+    output.push(line);
   }
-  return result.join('\n');
+  return output.join('\n');
+}
+
+// 后端修复兜底：前端修复失败时调后端
+async function fixViaBackend(yamlText) {
+  try {
+    const resp = await fetch('/api/fix-yaml', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ novel_text: yamlText }),
+    });
+    if (resp.ok) {
+      const data = await resp.json();
+      return data.yaml_content;
+    }
+  } catch (e) {}
+  return null;
 }
 
 // 解析 YAML 并渲染场景卡片
-function renderSceneCards(yamlText) {
+async function renderSceneCards(yamlText) {
   scenePreview.innerHTML = '';
   let data;
   try {
     if (typeof jsyaml === 'undefined') throw new Error('js-yaml 库未加载，请检查网络连接');
-    const fixedYaml = fixYamlCommonErrors(yamlText);
-    data = jsyaml.load(fixedYaml);
+    let fixedYaml = fixYamlCommonErrors(yamlText);
+    try {
+      data = jsyaml.load(fixedYaml);
+    } catch (e1) {
+      // 前端修复失败，调后端修复兜底
+      const backendFixed = await fixViaBackend(yamlText);
+      if (backendFixed) {
+        fixedYaml = backendFixed;
+        data = jsyaml.load(fixedYaml);
+      } else {
+        throw e1;
+      }
+    }
   } catch (e) {
     scenePreview.innerHTML = '<div style="padding:20px;color:var(--error-text);text-align:center;">YAML 解析失败: ' + escHtml(e.message) + '</div>';
     return;
@@ -938,13 +1152,23 @@ function escHtml(s) {
 }
 
 // 解析 YAML 并渲染角色卡片
-function renderCharCards(yamlText) {
+async function renderCharCards(yamlText) {
   charPreview.innerHTML = '';
   let data;
   try {
     if (typeof jsyaml === 'undefined') throw new Error('js-yaml 库未加载，请检查网络连接');
-    const fixedYaml = fixYamlCommonErrors(yamlText);
-    data = jsyaml.load(fixedYaml);
+    let fixedYaml = fixYamlCommonErrors(yamlText);
+    try {
+      data = jsyaml.load(fixedYaml);
+    } catch (e1) {
+      const backendFixed = await fixViaBackend(yamlText);
+      if (backendFixed) {
+        fixedYaml = backendFixed;
+        data = jsyaml.load(fixedYaml);
+      } else {
+        throw e1;
+      }
+    }
   } catch (e) {
     charPreview.innerHTML = '<div style="padding:20px;color:var(--error-text);text-align:center;">YAML 解析失败: ' + escHtml(e.message) + '</div>';
     return;
@@ -1116,6 +1340,8 @@ btnConvert.addEventListener('click', async () => {
           lastRawYaml = data.yaml_content;
           btnDownload.disabled = false;
           btnCopy.disabled = false;
+          btnEdit.disabled = false;
+          addToHistory(data.yaml_content);
           if (data.warning) {
             showToast(data.warning, 'error');
           } else {
@@ -1139,7 +1365,7 @@ btnConvert.addEventListener('click', async () => {
 
 // 下载 YAML
 btnDownload.addEventListener('click', () => {
-  const content = yamlOutput.textContent;
+  const content = isEditing ? yamlEditor.value : yamlOutput.textContent;
   if (!content) return;
   const blob = new Blob([content], { type: 'text/yaml;charset=utf-8' });
   const url = URL.createObjectURL(blob);
@@ -1152,7 +1378,7 @@ btnDownload.addEventListener('click', () => {
 
 // 复制到剪贴板
 btnCopy.addEventListener('click', async () => {
-  const content = yamlOutput.textContent;
+  const content = isEditing ? yamlEditor.value : yamlOutput.textContent;
   if (!content) return;
   try {
     if (navigator.clipboard && navigator.clipboard.writeText) {
@@ -1170,6 +1396,64 @@ btnCopy.addEventListener('click', async () => {
     setTimeout(() => { btnCopy.textContent = '复制'; }, 2000);
   }
 });
+
+// YAML 编辑模式切换
+let isEditing = false;
+let validateTimer = null;
+
+btnEdit.addEventListener('click', () => {
+  if (!lastRawYaml) return;
+  isEditing = !isEditing;
+  if (isEditing) {
+    // 进入编辑模式
+    yamlOutput.style.display = 'none';
+    yamlEditorWrap.style.display = 'flex';
+    yamlEditor.value = lastRawYaml;
+    yamlEditor.style.height = yamlEditorWrap.parentElement.offsetHeight + 'px';
+    btnEdit.textContent = '完成';
+    btnEdit.classList.add('btn-primary');
+    btnEdit.classList.remove('btn-secondary');
+    validateYaml();
+  } else {
+    // 退出编辑模式
+    const edited = yamlEditor.value;
+    try {
+      const cleaned = fixYamlCommonErrors(edited);
+      jsyaml.load(cleaned);
+      // 校验通过，更新内容
+      lastRawYaml = edited;
+      yamlOutput.innerHTML = highlightYaml(edited);
+    } catch (e) {
+      showToast('YAML 格式有误，已保留编辑内容', 'error');
+      lastRawYaml = edited;
+      yamlOutput.innerHTML = highlightYaml(edited);
+    }
+    yamlEditorWrap.style.display = 'none';
+    yamlOutput.style.display = '';
+    yamlError.style.display = 'none';
+    btnEdit.textContent = '编辑';
+    btnEdit.classList.remove('btn-primary');
+    btnEdit.classList.add('btn-secondary');
+  }
+});
+
+// 实时校验
+function validateYaml() {
+  clearTimeout(validateTimer);
+  validateTimer = setTimeout(() => {
+    try {
+      const cleaned = fixYamlCommonErrors(yamlEditor.value);
+      jsyaml.load(cleaned);
+      yamlError.style.display = 'none';
+      yamlEditor.style.borderColor = 'var(--accent)';
+    } catch (e) {
+      yamlError.textContent = e.message;
+      yamlError.style.display = 'block';
+      yamlEditor.style.borderColor = '#e44';
+    }
+  }, 400);
+}
+yamlEditor.addEventListener('input', validateYaml);
 
 function fallbackCopy(text) {
   const ta = document.createElement('textarea');
@@ -1189,6 +1473,116 @@ function showToast(msg, type) {
   toast.style.display = 'block';
   setTimeout(() => { toast.style.display = 'none'; }, 4000);
 }
+
+// ===== 历史记录管理 =====
+const HISTORY_KEY = 'novel_to_script_history';
+const HISTORY_MAX = 20;
+
+function getHistory() {
+  try {
+    return JSON.parse(localStorage.getItem(HISTORY_KEY) || '[]');
+  } catch { return []; }
+}
+
+function saveHistory(items) {
+  localStorage.setItem(HISTORY_KEY, JSON.stringify(items));
+}
+
+function addToHistory(yamlContent) {
+  const text = novelInput.value.trim();
+  const summary = text.substring(0, 200).replace(/\n/g, ' ');
+  const item = {
+    id: Date.now(),
+    summary: summary,
+    yaml: yamlContent,
+    timestamp: new Date().toLocaleString('zh-CN'),
+    inputLength: text.length,
+  };
+  const items = getHistory();
+  items.unshift(item);
+  if (items.length > HISTORY_MAX) items.length = HISTORY_MAX;
+  saveHistory(items);
+  renderHistory();
+}
+
+function deleteHistoryItem(id) {
+  const items = getHistory().filter(i => i.id !== id);
+  saveHistory(items);
+  renderHistory();
+}
+
+function clearHistory() {
+  if (!confirm('确定要清空所有历史记录吗？')) return;
+  localStorage.removeItem(HISTORY_KEY);
+  renderHistory();
+}
+
+function restoreHistoryItem(id) {
+  const items = getHistory();
+  const item = items.find(i => i.id === id);
+  if (!item) return;
+  lastRawYaml = item.yaml;
+  yamlOutput.innerHTML = highlightYaml(item.yaml);
+  btnDownload.disabled = false;
+  btnCopy.disabled = false;
+  btnEdit.disabled = false;
+  switchTab(tabSource);
+  yamlOutput.style.display = '';
+  showToast('已恢复历史记录', 'success');
+}
+
+function renderHistory() {
+  const items = getHistory();
+  const section = document.getElementById('history-section');
+  const list = document.getElementById('history-list');
+  const count = document.getElementById('history-count');
+
+  if (items.length === 0) {
+    section.style.display = 'none';
+    return;
+  }
+
+  section.style.display = '';
+  count.textContent = items.length;
+
+  list.innerHTML = items.map(item => `
+    <div class="history-item" data-id="${item.id}">
+      <div class="history-item-content">
+        <div class="history-item-summary">${escHtml(item.summary)}...</div>
+        <div class="history-item-time">${item.timestamp} · ${item.inputLength} 字</div>
+      </div>
+      <button class="history-item-delete" data-delete-id="${item.id}">删除</button>
+    </div>
+  `).join('');
+
+  // 绑定事件
+  list.querySelectorAll('.history-item').forEach(el => {
+    el.addEventListener('click', (e) => {
+      if (e.target.classList.contains('history-item-delete')) return;
+      restoreHistoryItem(Number(el.dataset.id));
+    });
+  });
+  list.querySelectorAll('.history-item-delete').forEach(btn => {
+    btn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      deleteHistoryItem(Number(btn.dataset.deleteId));
+    });
+  });
+}
+
+// 历史记录折叠/展开
+document.getElementById('history-header').addEventListener('click', () => {
+  const list = document.getElementById('history-list');
+  const arrow = document.getElementById('history-arrow');
+  list.classList.toggle('show');
+  arrow.classList.toggle('open');
+});
+
+// 清空历史
+document.getElementById('history-clear').addEventListener('click', clearHistory);
+
+// 页面加载时渲染历史
+renderHistory();
 
 // YAML 语法高亮
 function highlightYaml(yaml) {
