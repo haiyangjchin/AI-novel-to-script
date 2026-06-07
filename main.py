@@ -19,16 +19,6 @@ app = FastAPI(title="AI 小说转剧本工具")
 app.mount("/static", StaticFiles(directory=str(BASE_DIR / "static")), name="static")
 app.mount("/sample", StaticFiles(directory=str(BASE_DIR / "sample")), name="sample")
 
-
-@app.middleware("http")
-async def no_cache_static(request, call_response):
-    response = await call_response(request)
-    if "/static/" in str(request.url.path):
-        response.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
-        response.headers["Pragma"] = "no-cache"
-        response.headers["Expires"] = "0"
-    return response
-
 # LLM 客户端（从环境变量读取配置，默认使用 DeepSeek）
 client = OpenAI(
     api_key=os.getenv("DEEPSEEK_API_KEY", "sk-placeholder"),
@@ -345,6 +335,13 @@ async def convert_novel_stream(req: ConvertRequest):
 @app.get("/api/health")
 async def health():
     return {"status": "ok"}
+
+
+@app.post("/api/fix-yaml")
+async def fix_yaml_endpoint(req: ConvertRequest):
+    """修复 LLM 生成的 YAML 中的常见结构错误"""
+    fixed = fix_yaml_common_errors(req.novel_text)
+    return {"yaml_content": fixed}
 
 
 @app.post("/api/extract-docx")

@@ -868,59 +868,80 @@ tabChar.addEventListener('click', () => {
 });
 
 // 修复 LLM 生成的 YAML 中的常见结构错误
-// 单 pass 状态机：追踪 dialogue 上下文，移除 dialogue 内的 actions: 及其子项
 function fixYamlCommonErrors(yamlText) {
   const lines = yamlText.split('\n');
-  const result = [];
+  const output = [];
   let inDialogue = false;
   let dialogueIndent = 0;
-  let skipIndent = -1; // > 0 时跳过所有缩进更深的行
+  let skipIndent = -1;
 
   for (const line of lines) {
     const stripped = line.replace(/^\s+/, '');
     const indent = stripped ? line.length - stripped.length : -1;
 
-    // 空行保持原样
-    if (!stripped) { result.push(line); continue; }
+    if (!stripped) { output.push(line); continue; }
 
-    // 正在跳过 actions 子行
     if (skipIndent >= 0) {
       if (indent > skipIndent) continue;
       skipIndent = -1;
     }
 
-    // 检测 dialogue 列表项
     if (/^-\s*character:/.test(stripped)) {
       inDialogue = true;
       dialogueIndent = indent;
-      result.push(line);
+      output.push(line);
       continue;
     }
 
-    // 检查是否退出 dialogue 块
     if (inDialogue && indent <= dialogueIndent) {
       inDialogue = false;
     }
 
-    // 在 dialogue 块内，移除 actions: 及其子项
     if (inDialogue && /^actions:\s*$/.test(stripped)) {
       skipIndent = indent;
       continue;
     }
 
-    result.push(line);
+    output.push(line);
   }
-  return result.join('\n');
+  return output.join('\n');
+}
+
+// 后端修复兜底：前端修复失败时调后端
+async function fixViaBackend(yamlText) {
+  try {
+    const resp = await fetch('/api/fix-yaml', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ novel_text: yamlText }),
+    });
+    if (resp.ok) {
+      const data = await resp.json();
+      return data.yaml_content;
+    }
+  } catch (e) {}
+  return null;
 }
 
 // 解析 YAML 并渲染场景卡片
-function renderSceneCards(yamlText) {
+async function renderSceneCards(yamlText) {
   scenePreview.innerHTML = '';
   let data;
   try {
     if (typeof jsyaml === 'undefined') throw new Error('js-yaml 库未加载，请检查网络连接');
-    const fixedYaml = fixYamlCommonErrors(yamlText);
-    data = jsyaml.load(fixedYaml);
+    let fixedYaml = fixYamlCommonErrors(yamlText);
+    try {
+      data = jsyaml.load(fixedYaml);
+    } catch (e1) {
+      // 前端修复失败，调后端修复兜底
+      const backendFixed = await fixViaBackend(yamlText);
+      if (backendFixed) {
+        fixedYaml = backendFixed;
+        data = jsyaml.load(fixedYaml);
+      } else {
+        throw e1;
+      }
+    }
   } catch (e) {
     scenePreview.innerHTML = '<div style="padding:20px;color:var(--error-text);text-align:center;">YAML 解析失败: ' + escHtml(e.message) + '</div>';
     return;
@@ -1005,13 +1026,23 @@ function escHtml(s) {
 }
 
 // 解析 YAML 并渲染角色卡片
-function renderCharCards(yamlText) {
+async function renderCharCards(yamlText) {
   charPreview.innerHTML = '';
   let data;
   try {
     if (typeof jsyaml === 'undefined') throw new Error('js-yaml 库未加载，请检查网络连接');
-    const fixedYaml = fixYamlCommonErrors(yamlText);
-    data = jsyaml.load(fixedYaml);
+    let fixedYaml = fixYamlCommonErrors(yamlText);
+    try {
+      data = jsyaml.load(fixedYaml);
+    } catch (e1) {
+      const backendFixed = await fixViaBackend(yamlText);
+      if (backendFixed) {
+        fixedYaml = backendFixed;
+        data = jsyaml.load(fixedYaml);
+      } else {
+        throw e1;
+      }
+    }
   } catch (e) {
     charPreview.innerHTML = '<div style="padding:20px;color:var(--error-text);text-align:center;">YAML 解析失败: ' + escHtml(e.message) + '</div>';
     return;
