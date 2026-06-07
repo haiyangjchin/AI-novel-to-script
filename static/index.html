@@ -452,6 +452,20 @@
     border-top: 1px dashed var(--border);
   }
 
+  /* ---- 角色关系图谱 ---- */
+  #graph-preview.show { display: flex !important; }
+  #relation-canvas {
+    background: #fdfcf9;
+    cursor: grab;
+  }
+  #relation-canvas:active { cursor: grabbing; }
+  .graph-legend div {
+    color: var(--text-secondary);
+    margin-bottom: 3px;
+    display: flex;
+    align-items: center;
+  }
+
   /* ---- 角色卡片预览 ---- */
   #char-preview {
     flex: 1;
@@ -783,6 +797,7 @@
         <button class="output-tab active" id="tab-source">源码</button>
         <button class="output-tab" id="tab-preview">预览</button>
         <button class="output-tab" id="tab-char">角色</button>
+        <button class="output-tab" id="tab-graph">关系图</button>
       </div>
       <div style="display:flex;gap:8px;align-items:center;">
         <button class="btn btn-secondary" id="btn-edit" style="padding:6px 14px;font-size:0.82rem;" disabled>编辑</button>
@@ -804,6 +819,15 @@
       </div>
       <div id="scene-preview"></div>
       <div id="char-preview"></div>
+      <div id="graph-preview" style="display:none;flex:1;min-height:0;position:relative;">
+        <canvas id="relation-canvas" style="width:100%;height:100%;border:1px solid var(--border);border-radius:8px;"></canvas>
+        <div class="graph-legend" style="position:absolute;bottom:12px;right:12px;background:rgba(255,255,255,0.92);padding:10px 14px;border-radius:8px;border:1px solid var(--border);font-size:0.75rem;">
+          <div style="margin-bottom:4px;font-weight:600;color:var(--text);">关系类型</div>
+          <div><span style="display:inline-block;width:20px;height:3px;background:#16a34a;vertical-align:middle;margin-right:6px;"></span>正面关系</div>
+          <div><span style="display:inline-block;width:20px;height:3px;background:#dc2626;vertical-align:middle;margin-right:6px;"></span>负面关系</div>
+          <div><span style="display:inline-block;width:20px;height:3px;background:#9ca3af;vertical-align:middle;margin-right:6px;"></span>中性关系</div>
+        </div>
+      </div>
     </div>
   </div>
 
@@ -896,8 +920,11 @@ const convertStatus = document.getElementById('convert-status');
 const tabSource = document.getElementById('tab-source');
 const tabPreview = document.getElementById('tab-preview');
 const tabChar = document.getElementById('tab-char');
+const tabGraph = document.getElementById('tab-graph');
 const scenePreview = document.getElementById('scene-preview');
 const charPreview = document.getElementById('char-preview');
+const graphPreview = document.getElementById('graph-preview');
+const relationCanvas = document.getElementById('relation-canvas');
 const toast = document.getElementById('toast');
 
 let lastChapterResult = null;  // 缓存最近一次章节检测结果
@@ -996,11 +1023,12 @@ function updateConvertStatus() {
 
 // 标签切换：源码 / 预览 / 角色
 function switchTab(tab) {
-  [tabSource, tabPreview, tabChar].forEach(t => t.classList.remove('active'));
+  [tabSource, tabPreview, tabChar, tabGraph].forEach(t => t.classList.remove('active'));
   tab.classList.add('active');
   yamlOutput.style.display = 'none';
   scenePreview.classList.remove('show');
   charPreview.classList.remove('show');
+  graphPreview.classList.remove('show');
 }
 tabSource.addEventListener('click', () => {
   switchTab(tabSource);
@@ -1043,6 +1071,20 @@ tabChar.addEventListener('click', () => {
   }
   charPreview.classList.add('show');
   if (lastRawYaml) renderCharCards(lastRawYaml);
+});
+tabGraph.addEventListener('click', () => {
+  switchTab(tabGraph);
+  if (isEditing) {
+    yamlEditorWrap.style.display = 'none';
+    yamlOutput.style.display = '';
+    yamlError.style.display = 'none';
+    btnEdit.textContent = '编辑';
+    btnEdit.classList.remove('btn-primary');
+    btnEdit.classList.add('btn-secondary');
+    isEditing = false;
+  }
+  graphPreview.classList.add('show');
+  if (lastRawYaml) renderRelationGraph(lastRawYaml);
 });
 
 // 修复 LLM 生成的 YAML 中的常见结构错误
@@ -1255,6 +1297,248 @@ async function renderCharCards(yamlText) {
       </div>`;
     charPreview.appendChild(card);
   });
+}
+
+// ===== 角色关系图谱（力导向图） =====
+let graphNodes = [];
+let graphEdges = [];
+let graphAnimId = null;
+let dragNode = null;
+
+const ROLE_WEIGHT = { '主角': 1.0, '反派': 0.85, '配角': 0.7, '龙套': 0.5 };
+
+function classifyRelation(relType) {
+  if (!relType) return 'neutral';
+  const t = relType.toLowerCase();
+  const positive = ['朋友', '爱人', '夫妻', '恋人', '父', '母', '兄弟', '姐妹', '师徒', '同伴', '盟友', '好友', '搭档', '亲人', '家人'];
+  const negative = ['敌人', '对手', '仇人', '情敌', '宿敌', '敌对', '对立', '仇恨', '背叛'];
+  for (const p of positive) { if (t.includes(p)) return 'positive'; }
+  for (const n of negative) { if (t.includes(n)) return 'negative'; }
+  return 'neutral';
+}
+
+const REL_COLORS = { positive: '#16a34a', negative: '#dc2626', neutral: '#9ca3af' };
+
+async function renderRelationGraph(yamlText) {
+  if (graphAnimId) { cancelAnimationFrame(graphAnimId); graphAnimId = null; }
+
+  let data;
+  try {
+    let fixedYaml = fixYamlCommonErrors(yamlText);
+    try {
+      data = jsyaml.load(fixedYaml);
+    } catch (e1) {
+      const backendFixed = await fixViaBackend(yamlText);
+      if (backendFixed) { data = jsyaml.load(backendFixed); }
+      else { throw e1; }
+    }
+  } catch (e) {
+    return;
+  }
+
+  if (!data || !data.characters || !data.characters.length) return;
+
+  const canvas = relationCanvas;
+  const rect = canvas.parentElement.getBoundingClientRect();
+  const dpr = window.devicePixelRatio || 1;
+  canvas.width = rect.width * dpr;
+  canvas.height = rect.height * dpr;
+  canvas.style.width = rect.width + 'px';
+  canvas.style.height = rect.height + 'px';
+  const ctx2 = canvas.getContext('2d');
+  ctx2.scale(dpr, dpr);
+  const W = rect.width;
+  const H = rect.height;
+
+  const characters = data.characters;
+
+  // 构建节点
+  graphNodes = characters.map((c, i) => {
+    const angle = (2 * Math.PI * i) / characters.length;
+    const radius = Math.min(W, H) * 0.3;
+    return {
+      id: c.id,
+      name: c.name,
+      role: c.role || '配角',
+      weight: ROLE_WEIGHT[c.role] || 0.6,
+      x: W / 2 + radius * Math.cos(angle) + (Math.random() - 0.5) * 40,
+      y: H / 2 + radius * Math.sin(angle) + (Math.random() - 0.5) * 40,
+      vx: 0,
+      vy: 0,
+    };
+  });
+
+  // 构建边
+  graphEdges = [];
+  const nodeMap = {};
+  graphNodes.forEach(n => { nodeMap[n.id] = n; });
+
+  characters.forEach(c => {
+    if (!c.relationships) return;
+    c.relationships.forEach(rel => {
+      let targetId, relType;
+      if (typeof rel === 'string') {
+        // 格式："CHAR_02: 朋友"
+        const parts = rel.split(/[:：]/);
+        targetId = parts[0] ? parts[0].trim() : '';
+        relType = parts[1] ? parts[1].trim() : '';
+      } else {
+        targetId = rel.with || rel.target || '';
+        relType = rel.type || rel.relation || '';
+      }
+      if (targetId && nodeMap[targetId]) {
+        // 避免重复边
+        const key = [c.id, targetId].sort().join('-');
+        if (!graphEdges.find(e => e.key === key)) {
+          graphEdges.push({
+            key,
+            source: nodeMap[c.id],
+            target: nodeMap[targetId],
+            type: relType,
+            category: classifyRelation(relType),
+          });
+        }
+      }
+    });
+  });
+
+  // 力导向模拟
+  const REPULSION = 5000;
+  const ATTRACTION = 0.005;
+  const DAMPING = 0.85;
+  const CENTER_GRAVITY = 0.01;
+  const ITERATIONS = 200;
+
+  function simulate() {
+    // 排斥力（所有节点对）
+    for (let i = 0; i < graphNodes.length; i++) {
+      for (let j = i + 1; j < graphNodes.length; j++) {
+        const a = graphNodes[i], b = graphNodes[j];
+        let dx = a.x - b.x, dy = a.y - b.y;
+        let dist = Math.sqrt(dx * dx + dy * dy) || 1;
+        let force = REPULSION / (dist * dist);
+        let fx = (dx / dist) * force, fy = (dy / dist) * force;
+        a.vx += fx; a.vy += fy;
+        b.vx -= fx; b.vy -= fy;
+      }
+    }
+
+    // 吸引力（边）
+    graphEdges.forEach(e => {
+      let dx = e.target.x - e.source.x, dy = e.target.y - e.source.y;
+      let dist = Math.sqrt(dx * dx + dy * dy) || 1;
+      let force = dist * ATTRACTION;
+      let fx = (dx / dist) * force, fy = (dy / dist) * force;
+      e.source.vx += fx; e.source.vy += fy;
+      e.target.vx -= fx; e.target.vy -= fy;
+    });
+
+    // 中心引力
+    graphNodes.forEach(n => {
+      n.vx += (W / 2 - n.x) * CENTER_GRAVITY;
+      n.vy += (H / 2 - n.y) * CENTER_GRAVITY;
+    });
+
+    // 更新位置
+    graphNodes.forEach(n => {
+      if (n === dragNode) return;
+      n.vx *= DAMPING;
+      n.vy *= DAMPING;
+      n.x += n.vx;
+      n.y += n.vy;
+      // 边界约束
+      n.x = Math.max(40, Math.min(W - 40, n.x));
+      n.y = Math.max(40, Math.min(H - 40, n.y));
+    });
+  }
+
+  function draw() {
+    ctx2.clearRect(0, 0, W, H);
+
+    // 画边
+    graphEdges.forEach(e => {
+      ctx2.beginPath();
+      ctx2.moveTo(e.source.x, e.source.y);
+      ctx2.lineTo(e.target.x, e.target.y);
+      ctx2.strokeStyle = REL_COLORS[e.category];
+      ctx2.lineWidth = 2;
+      ctx2.globalAlpha = 0.6;
+      ctx2.stroke();
+      ctx2.globalAlpha = 1;
+
+      // 关系标签
+      if (e.type) {
+        const mx = (e.source.x + e.target.x) / 2;
+        const my = (e.source.y + e.target.y) / 2;
+        ctx2.font = '11px sans-serif';
+        ctx2.fillStyle = REL_COLORS[e.category];
+        ctx2.textAlign = 'center';
+        ctx2.fillText(e.type, mx, my - 6);
+      }
+    });
+
+    // 画节点
+    graphNodes.forEach(n => {
+      const r = 16 + n.weight * 20;
+
+      // 节点圆
+      ctx2.beginPath();
+      ctx2.arc(n.x, n.y, r, 0, Math.PI * 2);
+      ctx2.fillStyle = n.role === '主角' ? '#b8753b' : n.role === '反派' ? '#dc2626' : '#6b5e4a';
+      ctx2.globalAlpha = 0.15;
+      ctx2.fill();
+      ctx2.globalAlpha = 1;
+      ctx2.strokeStyle = n.role === '主角' ? '#b8753b' : n.role === '反派' ? '#dc2626' : '#9ca3af';
+      ctx2.lineWidth = 2;
+      ctx2.stroke();
+
+      // 角色名
+      ctx2.font = 'bold 13px "PingFang SC", "Microsoft YaHei", sans-serif';
+      ctx2.fillStyle = '#2c2416';
+      ctx2.textAlign = 'center';
+      ctx2.textBaseline = 'middle';
+      ctx2.fillText(n.name, n.x, n.y);
+
+      // 角色类型标签
+      ctx2.font = '10px sans-serif';
+      ctx2.fillStyle = '#6b5e4a';
+      ctx2.fillText(n.role, n.x, n.y + r + 12);
+    });
+  }
+
+  // 运行模拟
+  for (let i = 0; i < ITERATIONS; i++) simulate();
+  draw();
+
+  // 拖拽交互
+  canvas.onmousedown = (e) => {
+    const mx = e.offsetX, my = e.offsetY;
+    for (const n of graphNodes) {
+      const r = 16 + n.weight * 20;
+      if (Math.hypot(n.x - mx, n.y - my) < r + 5) {
+        dragNode = n;
+        canvas.style.cursor = 'grabbing';
+        break;
+      }
+    }
+  };
+  canvas.onmousemove = (e) => {
+    if (!dragNode) return;
+    dragNode.x = e.offsetX;
+    dragNode.y = e.offsetY;
+    dragNode.vx = 0;
+    dragNode.vy = 0;
+    // 轻量重绘（不做完整模拟）
+    draw();
+  };
+  canvas.onmouseup = () => {
+    dragNode = null;
+    canvas.style.cursor = 'grab';
+  };
+  canvas.onmouseleave = () => {
+    dragNode = null;
+    canvas.style.cursor = 'grab';
+  };
 }
 
 // 上传文件（支持 .txt 和 .docx）
